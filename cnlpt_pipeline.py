@@ -20,6 +20,27 @@ from transformers import (
 
 cnlpt_models = ['cnn', 'lstm', 'hier', 'cnlpt']
 
+piping_modes = ['batch', 'inference']
+
+# Huggingface uses weird terms for pipes,
+# i.e. sentiment-analysis for general text classification
+hf_pipe_tasks = ['token-classification', 'sentiment-analysis']
+
+@dataclass
+class PipingArguments:
+    mode: Optional[str] = field( default = 'batch',
+        metadata={'help' : 'Piping output mode, to a file or to next model', 'choices':piping_modes}
+    )
+
+    hf_pipe_task: Optional[str] = field( default = 'token-classification',
+        metadata={'help' : 'First pipe type', 'choices':hf_pipe_task}
+    )
+
+    hf_pipe_task_2: Optional[str] = field( default = 'sentiment-analysis',
+        metadata={'help' : 'Second pipe type (for now, only used in inference mode)', 'choices':hf_pipe_task}
+    )
+    
+
 @dataclass
 class ModelArguments:
     """
@@ -110,14 +131,29 @@ def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments,
+         DataTrainingArguments,
+         TrainingArguments,
+         PipingArguments
+        ))
 
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        (
+            model_args,
+            data_args,
+            training_args,
+            piping_args
+        ) = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        (
+            model_args,
+            data_args,
+            training_args,
+            piping_args
+        ) = parser.parse_args_into_dataclasses()
         
     if (
             os.path.exists(training_args.output_dir)
@@ -188,6 +224,11 @@ def main():
         bias_fit=training_args.bias_fit,
         argument_regularization=training_args.arg_reg
     )
+    
+
+def piping(model, tokenizer, mode, hf_pipe_task, dataset):
+    initial_pipeline = pipeline(hf_pipe_task, model=model, tokenizer=tokenizer)
+
     
     
 if __name__ == "__main__":
