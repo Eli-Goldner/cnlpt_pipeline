@@ -1,6 +1,7 @@
 import dataclasses
 import sys
 import os
+import tqdm
 
 from typing import Callable, Dict, Optional, List, Union
 
@@ -225,10 +226,11 @@ def main():
         argument_regularization=training_args.arg_reg
     )
     
-
-def piping(model, tokenizer, mode, hf_pipe_task, dataset):
-    initial_pipeline = pipeline(hf_pipe_task, model=model, tokenizer=tokenizer)
-
+    initial_pipeline = pipeline(piping_args.hf_pipe_task, model=model, tokenizer=tokenizer)
+    # Hard coding for now
+    for out in tqdm(initial_pipeline(eval_dataset, batch_size=training_args.batch_size)):
+        for elem in out:
+            print(elem)
     
     
 if __name__ == "__main__":
