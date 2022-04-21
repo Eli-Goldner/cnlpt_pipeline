@@ -1,33 +1,30 @@
 import dataclasses
 import sys
 import os
-import torch
-import numpy as np
+import tqdm
 
-
-from tqdm.auto import tqdm
-
-from typing import Callable, Dict, Optional, List, Union, Tuple
-
-from torch.utils.data import DataLoader
+from typing import Callable, Dict, Optional, List, Union
 
 from dataclasses import dataclass, field
-from transformers import AutoConfig, AutoTokenizer, AutoModel, EvalPrediction
+from transformers import AutoConfig, AutoTokenizer, AutoModel, EvalPrediction, HfArgumentParser
+"""
 from .cnlp_processors import cnlp_processors, cnlp_output_modes, cnlp_compute_metrics, tagging, relex, classification
 from .cnlp_data import ClinicalNlpDataset, DataTrainingArguments
 
 from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
-from .CnlpPipeline import CnlpTaggingPipeline 
+"""
 
-from transformers.utils import ExplicitEnum
+from cnlp_processors import cnlp_processors, cnlp_output_modes, cnlp_compute_metrics, tagging, relex, classification
+from cnlp_data import ClinicalNlpDataset, DataTrainingArguments
+
+from CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
+
 
 from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
     set_seed,
-    pipeline,
-    default_data_collator,
 )
 
 cnlpt_models = ['cnn', 'lstm', 'hier', 'cnlpt']
@@ -38,36 +35,6 @@ piping_modes = ['batch', 'inference']
 # i.e. sentiment-analysis for general text classification
 hf_pipe_tasks = ['token-classification', 'sentiment-analysis']
 
-class AggregationStrategy(ExplicitEnum):
-    """All the valid aggregation strategies for TokenClassificationPipeline"""
-
-    NONE = "none"
-    SIMPLE = "simple"
-    FIRST = "first"
-    AVERAGE = "average"
-    MAX = "max"
-
-@dataclass
-class CnlpTrainingArguments(TrainingArguments):
-    """
-    Additional arguments specific to this class
-    """
-    evals_per_epoch: Optional[int] = field(
-        default = -1, metadata={"help": "Number of times to evaluate and possibly save model per training epoch (allows for a lazy kind of early stopping)"}
-    )
-    final_task_weight: Optional[float] = field(
-        default=1.0, metadata={"help": "Amount to up/down-weight final task in task list (other tasks weighted 1.0)"}
-    )
-    freeze: bool = field(
-        default=False, metadata={"help": "Freeze the encoder layers and only train the layer between the encoder and classification architecture. Probably works best with --token flag since [CLS] may not be well-trained for anything in particular."}
-    )
-    arg_reg: Optional[float] = field(
-        default=-1, metadata={"help": "Weight to use on argument regularization term (penalizes end-to-end system if a discovered relation has low probability of being any entity type). Value < 0 (default) turns off this penalty."}
-    )
-    bias_fit: bool = field(
-        default=False, metadata={"help": "Only optimize the bias parameters of the encoder (and the weights of the classifier heads), as proposed in the BitFit paper by Ben Zaken et al. 2021 (https://arxiv.org/abs/2106.10199)"}
-    )
-
 @dataclass
 class PipingArguments:
     mode: Optional[str] = field( default = 'batch',
@@ -75,11 +42,11 @@ class PipingArguments:
     )
 
     hf_pipe_task: Optional[str] = field( default = 'token-classification',
-        metadata={'help' : 'First pipe type', 'choices':hf_pipe_tasks}
+        metadata={'help' : 'First pipe type', 'choices':hf_pipe_task}
     )
 
     hf_pipe_task_2: Optional[str] = field( default = 'sentiment-analysis',
-        metadata={'help' : 'Second pipe type (for now, only used in inference mode)', 'choices':hf_pipe_tasks}
+        metadata={'help' : 'Second pipe type (for now, only used in inference mode)', 'choices':hf_pipe_task}
     )
     
 
@@ -166,7 +133,9 @@ class ModelArguments:
         },
     )
 
- 
+
+
+    
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -174,10 +143,9 @@ def main():
     parser = HfArgumentParser(
         (ModelArguments,
          DataTrainingArguments,
-         CnlpTrainingArguments,
+         TrainingArguments,
          PipingArguments
-        )
-    )
+        ))
 
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
@@ -207,32 +175,6 @@ def main():
         )
 
     assert len(data_args.task_name) == len(data_args.data_dir), 'Number of tasks and data directories should be the same!'
-
-    try:
-        task_names = []
-        num_labels = []
-        output_mode = []
-        tagger = []
-        relations = []
-        for task_name in data_args.task_name:
-            processor = cnlp_processors[task_name]()
-            if processor.get_num_tasks() > 1:
-                for subtask_num in range(processor.get_num_tasks()):
-                    task_names.append(task_name + "-" + processor.get_classifiers()[subtask_num])
-                    num_labels.append(len(processor.get_labels()))
-                    output_mode.append(classification)
-                    tagger.append(False)
-                    relations.append(False)
-            else:
-                task_names.append(task_name)
-                num_labels.append(len(processor.get_labels()))
-                
-                output_mode.append(cnlp_output_modes[task_name])
-                tagger.append(cnlp_output_modes[task_name] == tagging)
-                relations.append(cnlp_output_modes[task_name] == relex)
-                
-    except KeyError:
-        raise ValueError("Task not found: %s" % (data_args.task_name))
 
     # Note Tim's trick of having the tokenizer used to train the model being required
     # (if the encoder name is a path)
@@ -275,10 +217,7 @@ def main():
         )
         if training_args.do_predict else None
     )
-
-    AutoConfig.register("cnlpt", CnlpConfig)
-    AutoModel.register(CnlpConfig, CnlpModelForClassification)
-
+    
     config = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.encoder_name,
         cache_dir=model_args.cache_dir,
@@ -294,50 +233,13 @@ def main():
         bias_fit=training_args.bias_fit,
         argument_regularization=training_args.arg_reg
     )
-
-    task_name = data_args.task_name[0]
-
-    print(task_name)
-    print(data_args.task_name)
     
-    pipeline = CnlpTaggingPipeline(model, tokenizer, task_name)
-    pipeline.forward(dataset=eval_dataset)
-    """
-    eval_dataloader = DataLoader(
-        eval_dataset, batch_size=64, collate_fn=default_data_collator
-    )
-
-    
-    # initial_pipeline = TaggingPipeline(model=model, tokenizer=tokenizer)
+    initial_pipeline = pipeline(piping_args.hf_pipe_task, model=model, tokenizer=tokenizer)
     # Hard coding for now
-
-    for out in initial_pipeline(eval_dataset, batch_size=training_args.eval_batch_size):
+    for out in tqdm(initial_pipeline(eval_dataset, batch_size=training_args.batch_size)):
         for elem in out:
             print(elem)
     
     
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model.to(device)
-    model.eval()
-
-
-    
-    for batch in eval_dataloader:
-        batch = {k: v.to(device) for k, v in batch.items()}
-        with torch.no_grad():
-        #    outputs = model(**batch)
-            outputs = model(**batch)
-            
-        logits = outputs['logits']
-        model_outputs =  {
-            "logits": logits,
-            "input_ids" : batch['input_ids'],
-        }
-        ents = postprocess(model_outputs, tokenizer, model)
-        for ent in ents:
-            print(ent)
-    """
-        
- 
 if __name__ == "__main__":
     main()
