@@ -32,7 +32,12 @@ class AggregationStrategy(ExplicitEnum):
 
 
 class CnlpPipeline:
-    def __init__(self, model, tokenizer, task_name):
+    def __init__(
+            self,
+            model,
+            tokenizer,
+            task_name
+    ):
         self.model = model
         self.tokenizer = tokenizer
         processor = cnlp_processors[task_name]()
@@ -67,24 +72,20 @@ class CnlpPipeline:
         
 
 class CnlpTaggingPipeline(CnlpPipeline):
-    def __init__(self, model,tokenizer,task_name):
+    def __init__(
+            self,
+            model,
+            tokenizer,
+            task_name
+    ):
         super().__init__(model, tokenizer, task_name)
     
     def postprocess(self, model_outputs, aggregation_strategy=AggregationStrategy.NONE, ignore_labels=None):
         if ignore_labels is None:
             ignore_labels = ["O"]
-        logits = model_outputs["logits"][0]#.numpy()
-        print(f"logits len : {len(logits)}")
-        print(f"logit shape : {logits.shape}")
-        #sentence = model_outputs["sentence"]
-        input_ids = model_outputs["input_ids"]#[0]
-        print(f"input_ids len : {len(input_ids)}")
-        print(f"input_ids shape : {input_ids.shape}")
-        #offset_mapping = model_outputs["offset_mapping"][0] if model_outputs["offset_mapping"] is not None else None
-        #special_tokens_mask = model_outputs["special_tokens_mask"][0].numpy()
+        logits = model_outputs["logits"][0] #Due to being wrapped
+        input_ids = model_outputs["input_ids"]
         
-        #maxes = np.max(logits, axis=-1, keepdims=True)
-        #shifted_exp = np.exp(logits - maxes)
         maxes, _ = torch.max(logits, dim=-1, keepdim=True)
         shifted_exp = torch.exp(logits - maxes)
         scores = shifted_exp / torch.sum(shifted_exp, dim=-1, keepdim=True)
@@ -122,7 +123,11 @@ class CnlpTaggingPipeline(CnlpPipeline):
     ) -> List[dict]:
         """Fuse various numpy arrays into dicts with all the information needed for aggregation"""
         pre_entities = []
-        print(self.tokenizer.decode([int(idx) for idx in input_ids], clean_up_tokenization_spaces=False))
+        decoded_output = self.tokenizer.decode(
+            [int(idx) for idx in input_ids],
+            clean_up_tokenization_spaces=False
+        )
+        sentence = decoded_output.split("</s>")[0][4:] 
         for idx, token_scores in enumerate(scores):
             # Filter special_tokens, they should only occur
             # at the sentence boundaries since we're not encoding pairs of
