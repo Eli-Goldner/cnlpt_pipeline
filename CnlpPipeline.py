@@ -40,11 +40,11 @@ class CnlpPipeline:
     ):
         self.model = model
         self.tokenizer = tokenizer
-        processor = cnlp_processors[task_name]()
-        self.labels = processor.get_labels()
+        self.processor = cnlp_processors[task_name]()
+        self.labels = self.processor.get_labels()
         
 
-    def forward(self, dataset, batch_size=64):
+    def __call__(self, data_file, mode, batch_size=64):
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.model.to(device)
         self.model.eval()
@@ -66,11 +66,28 @@ class CnlpPipeline:
             }
             ents = self.postprocess(model_outputs)
             for ent in ents:
-                print(ent)
+                print(ent) 
 
-
-        
-
+    def preprocess(self, sentences):
+            model_inputs = self.tokenizer()
+                
+    def get_samples_and_labels(self, in_file : str, mode : str):
+        if mode == 'inference':
+            # 'test' let's us forget labels
+            examples =  self.processor._create_examples(
+                self.processor._read_tsv(in_file),
+                "test"
+            )
+        elif mode == 'eval':
+            # 'dev' lets us get labels without running into issues of downsampling
+            examples = self.processor._create_examples(
+                self.processor._read_tsv(in_file),
+                "dev"
+            )
+        else:
+            ValueError("Mode must be either inference or eval")
+        return examples
+ 
 class CnlpTaggingPipeline(CnlpPipeline):
     def __init__(
             self,

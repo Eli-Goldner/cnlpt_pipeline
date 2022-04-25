@@ -32,7 +32,7 @@ from transformers import (
 
 cnlpt_models = ['cnn', 'lstm', 'hier', 'cnlpt']
 
-piping_modes = ['batch', 'inference']
+piping_modes = ['eval', 'inference']
 
 # Huggingface uses weird terms for pipes,
 # i.e. sentiment-analysis for general text classification
@@ -70,10 +70,15 @@ class CnlpTrainingArguments(TrainingArguments):
 
 @dataclass
 class PipingArguments:
-    mode: Optional[str] = field( default = 'batch',
-        metadata={'help' : 'Piping output mode, to a file or to next model', 'choices':piping_modes}
+    mode: Optional[str] = field( default = 'inference',
+        metadata={'help' : 'Piping output mode, to stdout or to metrics', 'choices':piping_modes}
     )
 
+    in_file: str = field(
+        metadata{'help' : 'File containing samples and/or labels for inference, or samples and labels for evaluation'}
+    )
+
+    """
     hf_pipe_task: Optional[str] = field( default = 'token-classification',
         metadata={'help' : 'First pipe type', 'choices':hf_pipe_tasks}
     )
@@ -81,6 +86,7 @@ class PipingArguments:
     hf_pipe_task_2: Optional[str] = field( default = 'sentiment-analysis',
         metadata={'help' : 'Second pipe type (for now, only used in inference mode)', 'choices':hf_pipe_tasks}
     )
+    """
     
 
 @dataclass
@@ -279,6 +285,8 @@ def main():
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
+    piping_args.in_file
+    
     config = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.encoder_name,
         cache_dir=model_args.cache_dir,
@@ -338,6 +346,6 @@ def main():
             print(ent)
     """
         
- 
+   
 if __name__ == "__main__":
     main()
