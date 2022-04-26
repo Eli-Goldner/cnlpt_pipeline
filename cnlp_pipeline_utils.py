@@ -203,8 +203,7 @@ class TaggingPipeline(Pipeline):
         )
 
         tagged_entities = self.attach_tags(pre_entities, label_list) #, aggregation_strategy)
-        # Filter anything that is in self.ignore_labels
-        tagged_sent = self.coalesce_tags(tagged_entities) 
+        final_tags = self.coalesce_tags(tagged_entities) 
         return entities
 
     def gather_pre_entities(
