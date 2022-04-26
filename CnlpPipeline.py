@@ -41,37 +41,61 @@ class CnlpPipeline:
         self.model = model
         self.tokenizer = tokenizer
         self.processor = cnlp_processors[task_name]()
-        self.labels = self.processor.get_labels()
+        self.label_list = self.processor.get_labels()
         
 
+    def ensure_tensor_on_device(self, **inputs):
+        """
+        Ensure PyTorch tensors are on the specified device.
+        Args:
+            inputs (keyword arguments that should be `torch.Tensor`, the rest is ignored):
+                The tensors to place on `self.device`.
+            Recursive on lists **only**.
+        Return:
+            `Dict[str, torch.Tensor]`: The same as `inputs` but on the proper device.
+        """
+        return self._ensure_tensor_on_device(inputs, self.device)
+
+    def _ensure_tensor_on_device(self, inputs, device):
+        if isinstance(inputs, ModelOutput):
+            return ModelOutput(
+                {name: self._ensure_tensor_on_device(tensor, device) for name, tensor in inputs.items()}
+            )
+        elif isinstance(inputs, dict):
+            return {name: self._ensure_tensor_on_device(tensor, device) for name, tensor in inputs.items()}
+        elif isinstance(inputs, UserDict):
+            return UserDict({name: self._ensure_tensor_on_device(tensor, device) for name, tensor in inputs.items()})
+        elif isinstance(inputs, list):
+            return [self._ensure_tensor_on_device(item, device) for item in inputs]
+        elif isinstance(inputs, tuple):
+            return tuple([self._ensure_tensor_on_device(item, device) for item in inputs])
+        elif isinstance(inputs, torch.Tensor):
+            return inputs.to(device)
+        else:
+            return inputs
+
+        
     def __call__(self, data_file, mode, batch_size=64):
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.model.to(device)
         self.model.eval()
 
-        dataloader = DataLoader(
-            dataset, batch_size=batch_size, collate_fn=default_data_collator
-        )
-        
-        for batch in dataloader:
-            batch = {k: v.to(device) for k, v in batch.items()}
-            with torch.no_grad():
-                #    outputs = model(**batch)
-                outputs = self.model(**batch)
-                
-            logits = outputs['logits']
-            model_outputs =  {
-                "logits": logits,
-                "input_ids" : batch['input_ids'],
-            }
-            ents = self.postprocess(model_outputs)
-            for ent in ents:
-                print(ent) 
+        labels, sentences = self.get_sentences_and_labels(data_file, mode)
+        if mode == 'eval':
+            assert labels is not None, "Labels required for evaluation"
+            assert len(labels) == len(sentences), "Each sentence needs a label for evaluation"
 
+            
     def preprocess(self, sentences):
-            model_inputs = self.tokenizer()
+            model_inputs = self.tokenizer(
+                sentences,
+                max_length = 128, # hardcoding cnlp_data DataTrainingArguments default max_seq_length for now
+                padding = "max_length",
+                truncation=True,
+                is_split_into_words=True,
+            )
                 
-    def get_samples_and_labels(self, in_file : str, mode : str):
+    def get_sentences_and_labels(self, in_file : str, mode : str):
         if mode == 'inference':
             # 'test' let's us forget labels
             examples =  self.processor._create_examples(
@@ -86,8 +110,63 @@ class CnlpPipeline:
             )
         else:
             ValueError("Mode must be either inference or eval")
-        return examples
- 
+
+        label_map = {label : i for i, label in enumerate(self.label_list)}
+        def example2label(example):
+            return [label_map[label] for label in example.label]
+        labels = [example2label(example) for example in examples]
+
+        if examples[0].text_b is None:
+            sentences = [example.text_a.split(' ') for example in examples]
+        else:
+            sentences = [(example.text_a, example.text_b) for example in examples]
+        
+        return labels, sentences
+
+    def get_inference_context(self):
+        inference_context = (
+            torch.inference_mode if version.parse(torch.__version__) >= version.parse("1.9.0") else torch.no_grad
+        )
+        return inference_context
+
+    def forward(self, model_inputs, **forward_params):
+        with self.device_placement():
+            if self.framework == "tf":
+                model_inputs["training"] = False
+                model_outputs = self._forward(model_inputs, **forward_params)
+            elif self.framework == "pt":
+                inference_context = self.get_inference_context()
+                with inference_context():
+                    model_inputs = self._ensure_tensor_on_device(model_inputs, device=self.device)
+                    model_outputs = self._forward(model_inputs, **forward_params)
+                    model_outputs = self._ensure_tensor_on_device(model_outputs, device=torch.device("cpu"))
+            else:
+                raise ValueError(f"Framework {self.framework} is not supported")
+        return model_outputs
+
+    def get_iterator(
+        self, inputs, num_workers: int, batch_size: int, preprocess_params, forward_params, postprocess_params
+    ):
+        if isinstance(inputs, collections.abc.Sized):
+            dataset = PipelineDataset(inputs, self.preprocess, preprocess_params)
+        else:
+            if num_workers > 1:
+                logger.warning(
+                    "For iterable dataset using num_workers>1 is likely to result"
+                    " in errors since everything is iterable, setting `num_workers=1`"
+                    " to guarantee correctness."
+                )
+                num_workers = 1
+            dataset = PipelineIterator(inputs, self.preprocess, preprocess_params)
+        if "TOKENIZERS_PARALLELISM" not in os.environ:
+            logger.info("Disabling tokenizer parallelism, we're using DataLoader multithreading already")
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+        collate_fn = no_collate_fn if batch_size == 1 else pad_collate_fn(self.tokenizer, self.feature_extractor)
+        dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=batch_size, collate_fn=collate_fn)
+        model_iterator = PipelineIterator(dataloader, self.forward, forward_params, loader_batch_size=batch_size)
+        final_iterator = PipelineIterator(model_iterator, self.postprocess, postprocess_params)
+        return final_iterator
+    
 class CnlpTaggingPipeline(CnlpPipeline):
     def __init__(
             self,
