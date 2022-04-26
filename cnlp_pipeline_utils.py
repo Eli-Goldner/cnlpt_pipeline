@@ -185,27 +185,26 @@ class TaggingPipeline(Pipeline):
         sentence = model_outputs["sentence"]
         input_ids = model_outputs["input_ids"][0]
         word_ids = model_outputs["word_ids"][0]
-        
 
+        if task_processor is None:
+            raise ValueError("You guessed it!")
+
+        label_list = task_processor.get_labels()
+
+        
         maxes = np.max(logits, axis=-1, keepdims=True)
         shifted_exp = np.exp(logits - maxes)
         scores = shifted_exp / shifted_exp.sum(axis=-1, keepdims=True)
 
         # Trying it their way for ease of reading
-        # pre-entities roughly are tokens
+        # pre-entities roughly are tagged tokens
         pre_entities = self.gather_pre_entities(
             input_ids, word_ids, scores #, offset_mapping, special_tokens_mask, aggregation_strategy - don't use/need these
         )
 
-        # For aggregation we'll use Dongfang's logic from cnlp_data
-        grouped_entities = self.aggregate(pre_entities) #, aggregation_strategy)
+        tagged_entities = self.attach_tags(pre_entities, label_list) #, aggregation_strategy)
         # Filter anything that is in self.ignore_labels
-        entities = [
-            entity
-            for entity in grouped_entities
-            if entity.get("entity", None) not in ignore_labels
-            and entity.get("entity_group", None) not in ignore_labels
-        ]
+        tagged_sent = self.coalesce_tags(tagged_entities) 
         return entities
 
     def gather_pre_entities(
@@ -215,29 +214,47 @@ class TaggingPipeline(Pipeline):
             scores: np.ndarray,
     ) -> List[dict]:
         pre_entities = []
+        assert len(word_ids) == len(scores), "Eq problem 1"
+        assert len(word_ids) == len(input_ids), "Eq problem 2"
         for idx, token_scores in enumerate(scores):
-
-            word = self.tokenizer.convert_ids_to_tokens(int(input_ids[idx]))
+            token = self.tokenizer.convert_ids_to_tokens(int(input_ids[idx]))
             pre_entity = {
-                "word": word,
+                "token": token,
                 "index": idx,
+                "word_id": word_ids[idx]
+                "scores": token_scores
             }
             pre_entities.append(pre_entity)
         return pre_entities
 
-    def aggregate(self, pre_entities: List[dict]) -> List[dict]:
+    def attach_tags(self, pre_entities: List[dict], label_list) -> List[dict]:
         entities = []
         for pre_entity in pre_entities:
-            entity_idx = pre_entity["scores"].argmax()
+            label_idx = pre_entity["scores"].argmax()
             score = pre_entity["scores"][entity_idx]
             entity = {
-                "entity": self.model.config.id2label[entity_idx],
+                "label": label_list[label_idx], # self.model.config.id2label[entity_idx],
                 "score": score,
                 "index": pre_entity["index"],
-                "word": pre_entity["word"],
-                "start": pre_entity["start"],
-                "end": pre_entity["end"],
+                "token": pre_entity["token"],
+                "word_id":pre_entity["word_id"],
             }
             entities.append(entity)
         return entities
         
+    def coalesce_tags(self, tagged_entities: List[dict]) -> List[str]:
+        # modified from Dongfang's logic in cnlp_data's cnlp_convert_examples_to_features(
+        previous_word_idx = None
+        final_tags = []
+        for entity in tagged_entities:
+            word_idx =  entity["word_id"]
+            if word_idx is None:
+                previous_word_idx = word_idx
+                continue
+            elif word_idx != previous_word_idx:
+                final_tags.append(entity["label"])
+                previous_word_idx = word_idx
+            else:
+                previous_word_idx = word_idx
+                continue
+        return final_tags
