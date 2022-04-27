@@ -15,6 +15,36 @@ if is_tf_available():
 if is_torch_available():
     from transformers.models.auto.modeling_auto import MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
 
+def get_sentences_and_labels(task_processor, in_file : str, mode : str):
+    label_list = task_processor.get_labels()
+    if mode == 'inference':
+        # 'test' let's us forget labels
+        examples =  task_processor._create_examples(
+            task_processor._read_tsv(in_file),
+            "test"
+        )
+    elif mode == 'eval':
+        # 'dev' lets us get labels without running into issues of downsampling
+        examples = task_processor._create_examples(
+            task_processor._read_tsv(in_file),
+            "dev"
+        )
+    else:
+        ValueError("Mode must be either inference or eval")
+        
+    label_map = {label : i for i, label in enumerate(label_list)}
+    def example2label(example):
+        return [label_map[label] for label in example.label]
+    labels = [example2label(example) for example in examples]
+    
+    if examples[0].text_b is None:
+        sentences = [example.text_a.split(' ') for example in examples]
+    else:
+        sentences = [(example.text_a, example.text_b) for example in examples]
+        
+    return labels, sentences
+
+    
 class TaggingArgumentHandler(ArgumentHandler):
     """
     Handles arguments for token classification.
