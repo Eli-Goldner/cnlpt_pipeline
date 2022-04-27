@@ -119,8 +119,33 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
                 ValueError(
                     f"output mode {cnlp_output_modes[task_name]} not currently supported"
                 )
+    _, sentences = get_sentences_and_labels(
+        in_file = pipeline_args.in_file,
+        mode="inf",
+    )
+    
+    annotated_sents = assemble(
+        sentences,
+        pipeline_dict,
+        pipeline_args.axis_task,
+    )
+    
+    out_batch_encoding = tokenizer(
+        annotated_sents,
+        max_length=128,   # this and below two options need to be generalized   
+        padding = "max_length",
+        truncation=True,
+        is_split_into_words=True,
+    )
+    
+    for model in out_model_dict.values():
+        logits = model(**out_batch_encoding)
+        # more to be written here
         
 
+def assemble(sentence, pipeline_dict, axis_task):
+    pass
+        
 def get_sentences_and_labels(task_processor=None, in_file : str, mode : str): 
     if mode == "inf":
         # 'test' let's us forget labels
