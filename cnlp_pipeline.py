@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 
 from .cnlp_pipeline_utils import TaggingPipeline, get_sentences_and_labels
 
+from .cnlp_processors import cnlp_processors, cnlp_output_modes, cnlp_compute_metrics, tagging, relex, classification
+
 from transformers import AutoConfig, AutoTokenizer, AutoModel, HfArgumentParser
 
 modes=["inf", "eval"]
@@ -87,12 +89,61 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
         additional_special_tokens=['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
     )
 
+    pipeline_dict = {}
+    
     for file in os.listdir(pipeline_args.models_dir):
         model_dir = os.path.join(pipeline_args.models_dir, file)
         task_name = str(file)
         if os.path.isdir(model_dir) and task_name in cnlp_processors.keys():
-            pass
+            config = AutoConfig.from_pretrained(
+                model_dir,
+            )
 
+            model = CnlpModelForClassification.from_pretrained(
+                model_dir,
+                config=config,
+            )
+
+            task_processor = cnlp_processors[task_name]()
+             
+            pipeline_dict[task_name] = TaggingPipeline(
+                model=model,
+                tokenizer=tokenizer,
+                task_processor=task_processor
+            )
+
+def get_sentences_and_labels(task_processor, in_file : str, mode : str):
+    label_list = task_processor.get_labels()
+    if mode == "inf":
+        # 'test' let's us forget labels
+        examples =  task_processor._create_examples(
+            task_processor._read_tsv(in_file),
+            "test"
+        )
+    elif mode == "eval":
+        # 'dev' lets us get labels without running into issues of downsampling
+        examples = task_processor._create_examples(
+            task_processor._read_tsv(in_file),
+            "dev"
+        )
+    else:
+        ValueError("Mode must be either inference or eval")
+        
+    label_map = {label : i for i, label in enumerate(label_list)}
+    def example2label(example):
+        return [label_map[label] for label in example.label]
+    labels = [example2label(example) for example in examples]
+    
+    if examples[0].text_b is None:
+        sentences = [example.text_a.split(' ') for example in examples]
+    else:
+        sentences = [(example.text_a, example.text_b) for example in examples]
+        
+    return labels, sentences
+
+
+
+            
 def evaluation(pipeline_args : Tuple[DataClass, ...]):
     # holding off on this for now
     pass

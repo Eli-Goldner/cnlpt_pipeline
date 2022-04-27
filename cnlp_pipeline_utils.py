@@ -15,35 +15,6 @@ if is_tf_available():
 if is_torch_available():
     from transformers.models.auto.modeling_auto import MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
 
-def get_sentences_and_labels(task_processor, in_file : str, mode : str):
-    label_list = task_processor.get_labels()
-    if mode == 'inference':
-        # 'test' let's us forget labels
-        examples =  task_processor._create_examples(
-            task_processor._read_tsv(in_file),
-            "test"
-        )
-    elif mode == 'eval':
-        # 'dev' lets us get labels without running into issues of downsampling
-        examples = task_processor._create_examples(
-            task_processor._read_tsv(in_file),
-            "dev"
-        )
-    else:
-        ValueError("Mode must be either inference or eval")
-        
-    label_map = {label : i for i, label in enumerate(label_list)}
-    def example2label(example):
-        return [label_map[label] for label in example.label]
-    labels = [example2label(example) for example in examples]
-    
-    if examples[0].text_b is None:
-        sentences = [example.text_a.split(' ') for example in examples]
-    else:
-        sentences = [(example.text_a, example.text_b) for example in examples]
-        
-    return labels, sentences
-
     
 class TaggingArgumentHandler(ArgumentHandler):
     """
@@ -103,8 +74,6 @@ class TaggingArgumentHandler(ArgumentHandler):
 
 class TaggingPipeline(Pipeline):
     """
-    Ripped off from the eponymous HF code with some (in hindsight...) trivial tweaks for cnlpt
-
     Named Entity Recognition pipeline using any `ModelForTokenClassification`. See the [named entity recognition
     examples](../task_summary#named-entity-recognition) for more information.
     This token recognition pipeline can currently be loaded from [`pipeline`] using the following task identifier:
@@ -118,12 +87,14 @@ class TaggingPipeline(Pipeline):
 
     def __init__(self, args_parser=TaggingArgumentHandler(), *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Disabling for now 
+        """
         self.check_model_type(
             TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
             if self.framework == "tf"
             else MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
         )
-
+        """
         #self._basic_tokenizer = BasicTokenizer(do_lower_case=False)
         self._args_parser = args_parser
 
