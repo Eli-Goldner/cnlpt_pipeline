@@ -89,7 +89,8 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
         additional_special_tokens=['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
     )
 
-    pipeline_dict = {}
+    taggers_dict = {}
+    out_model_dict = {}
     
     for file in os.listdir(pipeline_args.models_dir):
         model_dir = os.path.join(pipeline_args.models_dir, file)
@@ -105,35 +106,48 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
             )
 
             task_processor = cnlp_processors[task_name]()
-             
-            pipeline_dict[task_name] = TaggingPipeline(
-                model=model,
-                tokenizer=tokenizer,
-                task_processor=task_processor
-            )
 
-def get_sentences_and_labels(task_processor, in_file : str, mode : str):
-    label_list = task_processor.get_labels()
+            if cnlp_output_modes[task_name] == tagging:
+                pipeline_dict[task_name] = TaggingPipeline(
+                    model=model,
+                    tokenizer=tokenizer,
+                    task_processor=task_processor
+                )
+            elif cnlp_output_modes[task_name] == classification:
+                out_model_dict[task_name] = model
+            else:
+                ValueError(
+                    f"output mode {cnlp_output_modes[task_name]} not currently supported"
+                )
+        
+
+def get_sentences_and_labels(task_processor=None, in_file : str, mode : str): 
     if mode == "inf":
         # 'test' let's us forget labels
         examples =  task_processor._create_examples(
             task_processor._read_tsv(in_file),
             "test"
         )
+        labels = None
     elif mode == "eval":
         # 'dev' lets us get labels without running into issues of downsampling
         examples = task_processor._create_examples(
             task_processor._read_tsv(in_file),
             "dev"
         )
+        label_list = task_processor.get_labels()
+        label_map = {label : i for i, label in enumerate(label_list)}
+        def example2label(example):
+            return [label_map[label] for label in example.label]
+
+        if examples[0].label:
+            labels = [example2label(example) for example in examples]
+        else:
+            ValueError("labels required for eval mode")
     else:
         ValueError("Mode must be either inference or eval")
         
-    label_map = {label : i for i, label in enumerate(label_list)}
-    def example2label(example):
-        return [label_map[label] for label in example.label]
-    labels = [example2label(example) for example in examples]
-    
+      
     if examples[0].text_b is None:
         sentences = [example.text_a.split(' ') for example in examples]
     else:
