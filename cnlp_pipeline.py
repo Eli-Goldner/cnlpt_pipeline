@@ -1,4 +1,5 @@
 import os
+import re
 
 from dataclasses import dataclass, field
 
@@ -7,6 +8,8 @@ from .cnlp_pipeline_utils import TaggingPipeline, get_sentences_and_labels
 from .cnlp_processors import cnlp_processors, cnlp_output_modes, cnlp_compute_metrics, tagging, relex, classification
 
 from transformers import AutoConfig, AutoTokenizer, AutoModel, HfArgumentParser
+
+from itertools import chain, groupby
 
 modes=["inf", "eval"]
 
@@ -141,11 +144,58 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
     for model in out_model_dict.values():
         logits = model(**out_batch_encoding)
         # more to be written here
+
+            
+def evaluation(pipeline_args : Tuple[DataClass, ...]):
+    # holding off on this for now
+
+    def partial_match(s1, s2):
+        part = min(len(s1), len(s2))
+        return s1[:part] == s2[:part]
+
+    
+    re.sub(r"</?a[1-2]>", "", new_sent)
+
+    pass
+
         
 
-def assemble(sentence, pipeline_dict, axis_task):
-    pass
-        
+def assemble(sentences, pipeline_dict, axis_task):
+    return list(
+        chain(
+            *[_assemble(sent, pipeline_dict, axis_task) for sent
+              in sentences]
+        )
+    )
+
+def _assemble(sentence, pipeline_dict, axis_task):
+    axis_ann = pipeline_dict[axis_task](sentence)
+    sig_ann_ls = []
+    for task, pipeline in pipeline_dict.items():
+        if task != axis_task:
+            sig_ann_ls += pipeline(sentence)
+    return merge_annotations(axis_ann, sig_ann_ls, sentence)
+
+def merge_annotations(axis_ann, sig_ann_ls, sentence):
+    merged_annotations = []
+    for sig_ann in sig_ann_ls:
+        raw_partitions = get_partitions(axis_ann, sig_ann)
+        anafora_tagged = get_anafora_tags(raw_partitions, sentences)
+        merged_annotations += anafora_tagged
+            
+def get_partitions(axis_ann, sig_ann): 
+    def tag2idx(t1, t2):
+        if t1 != 'O' and t2 != 'O':
+            ValueError("Overlapping tags!")
+        elif t1 != 'O':
+            return 1
+        elif t2 != 'O':
+            return 2
+        else:
+            ValueError(f"Something really strange happened: {t1}, {t2}")
+    return map(tag2idx, zip(axis_ann, sig_ann))
+
+
 def get_sentences_and_labels(task_processor=None, in_file : str, mode : str): 
     if mode == "inf":
         # 'test' let's us forget labels
@@ -180,12 +230,6 @@ def get_sentences_and_labels(task_processor=None, in_file : str, mode : str):
         
     return labels, sentences
 
-
-
-            
-def evaluation(pipeline_args : Tuple[DataClass, ...]):
-    # holding off on this for now
-    pass
 
 if __name__ == "__main__":
     main()
