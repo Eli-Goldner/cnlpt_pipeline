@@ -1,5 +1,6 @@
 import os
 import re
+import torch
 
 from dataclasses import dataclass, field
 
@@ -132,28 +133,41 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
         pipeline_dict,
         pipeline_args.axis_task,
     )
-    
-    out_batch_encoding = tokenizer(
-        annotated_sents,
-        max_length=128,   # this and below two options need to be generalized   
-        padding = "max_length",
-        truncation=True,
-        is_split_into_words=True,
-    )
-    
-    for model in out_model_dict.values():
-        logits = model(**out_batch_encoding)
-        # more to be written here
 
+    softmax = torch.nn.Softmax(dim = 1)
+    
+    for ann_sent in annotated_sents:
+        ann_encoding = tokenizer(
+            annotated_sent,
+            max_length=128,   # this and below two options need to be generalized   
+            padding = "max_length",
+            truncation=True,
+            is_split_into_words=True,
+        )
+        
+        for out_task, model in out_model_dict.items():
+            out_task_processor = cnlp_processors[task_name]()
+            out_task_labels = out_task_processor.get_labels()
+            model_outputs = model(**ann_encoding)
+            logits = model_outputs["logits"][0]
+            scores = softmax(logits)
+            out_label_idx = torch.argmax(scores).item()
+            print(out_task_labels[out_label_idx])
+            print(ann_sent)
+            # more to be written here
+            
             
 def evaluation(pipeline_args : Tuple[DataClass, ...]):
     # holding off on this for now
 
+    # used to get the relevant models from the label name,
+    # e.g. med-dosage -> med, dosage -> dphe-med, dphe-dosage,
+    # -> pipeline_dict[dphe-med], pipeline_dict[dphe-dosage] 
     def partial_match(s1, s2):
         part = min(len(s1), len(s2))
         return s1[:part] == s2[:part]
 
-    
+    # strip the sentence of tags
     re.sub(r"</?a[1-2]>", "", new_sent)
 
     pass
@@ -180,7 +194,7 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
     merged_annotations = []
     for sig_ann in sig_ann_ls:
         raw_partitions = get_partitions(axis_ann, sig_ann)
-        anafora_tagged = get_anafora_tags(raw_partitions, sentences)
+        anafora_tagged = get_anafora_tags(raw_partitions, sentence)
         merged_annotations += anafora_tagged
             
 def get_partitions(axis_ann, sig_ann): 
@@ -195,7 +209,18 @@ def get_partitions(axis_ann, sig_ann):
             ValueError(f"Something really strange happened: {t1}, {t2}")
     return map(tag2idx, zip(axis_ann, sig_ann))
 
-
+def get_anafora_tags(raw_partitions, sentence):
+    span_begin = 0
+    annotated_list = []
+    for tag_idx, span_iter in groupby(raw_partitions):
+        span_end = len(list(span_iter)) + span_begin
+        ann_span = sentence[span_begin:span_end] 
+        if tag_idx == 1:
+            ann_span = ['<a1>'] + ann_span + ['</a1>'] 
+        elif tag_idx == 2:
+            ann_span = ['<a2>'] + ann_span + ['</a2>']
+        annotated_list.extend(ann_span)
+        
 def get_sentences_and_labels(task_processor=None, in_file : str, mode : str): 
     if mode == "inf":
         # 'test' let's us forget labels
