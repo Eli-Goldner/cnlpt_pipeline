@@ -76,9 +76,9 @@ def main():
 
         
     if pipeline_args.mode == "inf":
-        inference()
+        inference(pipeline_args)
     elif pipeline_args.mode == "eval":
-        evaluation()
+        evaluation(pipeline_args)
     else:
         ValueError("Invalid pipe mode!")
 
@@ -92,45 +92,17 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
         add_prefix_space=True,
         additional_special_tokens=['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
     )
-
-    taggers_dict = {}
-    out_model_dict = {}
     
-    for file in os.listdir(pipeline_args.models_dir):
-        model_dir = os.path.join(pipeline_args.models_dir, file)
-        task_name = str(file)
-        if os.path.isdir(model_dir) and task_name in cnlp_processors.keys():
-            config = AutoConfig.from_pretrained(
-                model_dir,
-            )
-
-            model = CnlpModelForClassification.from_pretrained(
-                model_dir,
-                config=config,
-            )
-
-            task_processor = cnlp_processors[task_name]()
-
-            if cnlp_output_modes[task_name] == tagging:
-                pipeline_dict[task_name] = TaggingPipeline(
-                    model=model,
-                    tokenizer=tokenizer,
-                    task_processor=task_processor
-                )
-            elif cnlp_output_modes[task_name] == classification:
-                out_model_dict[task_name] = model
-            else:
-                ValueError(
-                    f"output mode {cnlp_output_modes[task_name]} not currently supported"
-                )
     _, sentences = get_sentences_and_labels(
         in_file = pipeline_args.in_file,
         mode="inf",
     )
+
+    taggers_dict, out_model_dict = model_dicts(pipeline_args.models_dir)
     
     annotated_sents = assemble(
         sentences,
-        pipeline_dict,
+        taggers_dict,
         pipeline_args.axis_task,
     )
 
@@ -154,38 +126,82 @@ def inference(pipeline_args : Tuple[DataClass, ...]):
             out_label_idx = torch.argmax(scores).item()
             print(out_task_labels[out_label_idx])
             print(ann_sent)
-            # more to be written here
             
             
-def evaluation(pipeline_args : Tuple[DataClass, ...]):
+def evaluation(pipeline_args):
     # holding off on this for now
 
     # used to get the relevant models from the label name,
     # e.g. med-dosage -> med, dosage -> dphe-med, dphe-dosage,
-    # -> pipeline_dict[dphe-med], pipeline_dict[dphe-dosage] 
-    def partial_match(s1, s2):
-        part = min(len(s1), len(s2))
-        return s1[:part] == s2[:part]
+    # -> taggers_dict[dphe-med], taggers_dict[dphe-dosage] 
+
+    labels, sentences = get_sentences_and_labels(
+        in_file = pipeline_args.in_file,
+        mode="inf",
+    )
+
+    
+    
+    
 
     # strip the sentence of tags
     re.sub(r"</?a[1-2]>", "", new_sent)
 
     pass
 
-        
+def classify(labels, sentences):
+    def partial_match(s1, s2):
+        part = min(len(s1), len(s2))
+        return s1[:part] == s2[:part]
+    
 
-def assemble(sentences, pipeline_dict, axis_task):
+
+def model_dicts(models_dir):    
+    taggers_dict = {}
+    out_model_dict = {}
+    
+    for file in os.listdir(models_dir):
+        model_dir = os.path.join(models_dir, file)
+        task_name = str(file)
+        if os.path.isdir(model_dir) and task_name in cnlp_processors.keys():
+
+            config = AutoConfig.from_pretrained(
+                model_dir,
+            )
+
+            model = CnlpModelForClassification.from_pretrained(
+                model_dir,
+                config=config,
+            )
+
+            task_processor = cnlp_processors[task_name]()
+            
+            if cnlp_output_modes[task_name] == tagging:
+                taggers_dict[task_name] = TaggingPipeline(
+                    model=model,
+                    tokenizer=tokenizer,
+                    task_processor=task_processor
+                )
+            elif cnlp_output_modes[task_name] == classification:
+                out_model_dict[task_name] = model
+            else:
+                ValueError(
+                    f"output mode {cnlp_output_modes[task_name]} not currently supported"
+                )
+    return taggers_dict, out_model_dict 
+
+def assemble(sentences, taggers_dict, axis_task):
     return list(
         chain(
-            *[_assemble(sent, pipeline_dict, axis_task) for sent
+            *[_assemble(sent, taggers_dict, axis_task) for sent
               in sentences]
         )
     )
 
-def _assemble(sentence, pipeline_dict, axis_task):
-    axis_ann = pipeline_dict[axis_task](sentence)
+def _assemble(sentence, taggers_dict, axis_task):
+    axis_ann = taggers_dict[axis_task](sentence)
     sig_ann_ls = []
-    for task, pipeline in pipeline_dict.items():
+    for task, pipeline in taggers_dict.items():
         if task != axis_task:
             sig_ann_ls += pipeline(sentence)
     return merge_annotations(axis_ann, sig_ann_ls, sentence)
