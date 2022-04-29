@@ -6,7 +6,8 @@ import numpy as np
 
 from transformers.models.bert.tokenization_bert import BasicTokenizer
 from transformers.utils import ExplicitEnum, add_end_docstrings, is_tf_available, is_torch_available
-from transformers.pipeline.base import PIPELINE_INIT_ARGS, ArgumentHandler, Dataset, Pipeline
+from transformers import pipeline
+from transformers.pipelines.base import PIPELINE_INIT_ARGS, ArgumentHandler, Dataset, Pipeline
 
 
 if is_tf_available():
@@ -221,8 +222,8 @@ class TaggingPipeline(Pipeline):
             pre_entity = {
                 "token": token,
                 "index": idx,
-                "word_id": word_ids[idx]
-                "scores": token_scores
+                "word_id": word_ids[idx],
+                "scores": token_scores,
             }
             pre_entities.append(pre_entity)
         return pre_entities

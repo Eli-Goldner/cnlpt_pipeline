@@ -1,12 +1,15 @@
 import os
 import re
 import torch
+import sys
 
 from dataclasses import dataclass, field
 
-from .cnlp_pipeline_utils import TaggingPipeline, get_sentences_and_labels
+from .cnlp_pipeline_utils import TaggingPipeline
 
 from .cnlp_processors import cnlp_processors, cnlp_output_modes, cnlp_compute_metrics, tagging, relex, classification
+
+from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
 
 from transformers import AutoConfig, AutoTokenizer, AutoModel, HfArgumentParser
 
@@ -65,16 +68,20 @@ class PipelineArguments:
     )
     
 def main():
-    parser = HfArgumentParser((PipelineArguments))
+    parser = HfArgumentParser(PipelineArguments)
 
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        pipeline_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
-    else:
-        pipeline_args = parser.parse_args_into_dataclasses()
 
-        
+        #the ',' is to deal with unary tuple weirdness
+        pipeline_args, = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+    else:
+        pipeline_args, = parser.parse_args_into_dataclasses()
+
+
+    print(pipeline_args)
+    print(type(pipeline_args))
     if pipeline_args.mode == "inf":
         inference(pipeline_args)
     elif pipeline_args.mode == "eval":
@@ -82,7 +89,7 @@ def main():
     else:
         ValueError("Invalid pipe mode!")
 
-def inference(pipeline_args : Tuple[DataClass, ...]):
+def inference(pipeline_args):
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
@@ -237,7 +244,7 @@ def get_anafora_tags(raw_partitions, sentence):
             ann_span = ['<a2>'] + ann_span + ['</a2>']
         annotated_list.extend(ann_span)
         
-def get_sentences_and_labels(task_processor=None, in_file : str, mode : str): 
+def get_sentences_and_labels(in_file : str, mode : str, task_processor=None): 
     if mode == "inf":
         # 'test' let's us forget labels
         examples =  task_processor._create_examples(
