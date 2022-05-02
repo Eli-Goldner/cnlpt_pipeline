@@ -219,7 +219,8 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
         raw_partitions = get_partitions(axis_ann, sig_ann)
         anafora_tagged = get_anafora_tags(raw_partitions, sentence)
         merged_annotations += anafora_tagged
-            
+    return merged_annotations
+
 def get_partitions(axis_ann, sig_ann): 
     def tag2idx(t1, t2):
         if t1 != 'O' and t2 != 'O':
