@@ -139,17 +139,14 @@ class TaggingPipeline(Pipeline):
         """
 
         _inputs = self._args_parser(inputs, **kwargs)
-        print(f"_inputs: {_inputs}")
         return super().__call__(inputs, **kwargs)
 
     def preprocess(self, sentence):
-        print(sentence)
-        #print(self.model)
-        #print(self.tokenizer)
         model_inputs = self.tokenizer(
-            sentence,
+            sentence.split(' '),
             max_length = 128, # hardcoding cnlp_data DataTrainingArguments default max_seq_length for now
             # maybe this means that other args would be preprocess params?
+            return_tensors=self.framework, #otherwise returns lists
             padding = "max_length",
             truncation=True,
             is_split_into_words=True,
@@ -159,6 +156,9 @@ class TaggingPipeline(Pipeline):
         # This is what we use for cnlpt/cTAKES based tagging
         # rather than an aggregation strategy
         model_inputs["word_ids"] = model_inputs.word_ids()
+
+        #print(f"preprocess sent : {modelsentence}")
+        #print(f"preprocess word ids : {word_ids}")
         
         return model_inputs
 
@@ -166,6 +166,8 @@ class TaggingPipeline(Pipeline):
         # Forward
         sentence = model_inputs.pop("sentence")
         word_ids = model_inputs.pop("word_ids")
+        #print(f"forward sent : {sentence}")
+        #print(f"forward word ids : {word_ids}")
         if self.framework == "tf":
             logits = self.model(model_inputs.data)[0]
         else:
@@ -187,8 +189,12 @@ class TaggingPipeline(Pipeline):
         logits = model_outputs["logits"][0].numpy()
         sentence = model_outputs["sentence"]
         input_ids = model_outputs["input_ids"][0]
-        word_ids = model_outputs["word_ids"][0]
+        word_ids = model_outputs["word_ids"]
 
+        #print(f"postprocess sent : {sentence}")
+        #print(f"postprocess word ids : {word_ids}")
+ 
+        
         if task_processor is None:
             raise ValueError("You guessed it!")
 
@@ -198,42 +204,44 @@ class TaggingPipeline(Pipeline):
         maxes = np.max(logits, axis=-1, keepdims=True)
         shifted_exp = np.exp(logits - maxes)
         scores = shifted_exp / shifted_exp.sum(axis=-1, keepdims=True)
+        
+        return self.get_annotation(input_ids, word_ids, scores[0], label_list)
 
-        # Trying it their way for ease of reading
-        # pre-entities roughly are tagged tokens
-        pre_entities = self.gather_pre_entities(
-            input_ids, word_ids, scores #, offset_mapping, special_tokens_mask, aggregation_strategy - don't use/need these
-        )
-
-        tagged_entities = self.attach_tags(pre_entities, label_list) #, aggregation_strategy)
-        final_tags = self.coalesce_tags(tagged_entities) 
-        return entities
-
-    def gather_pre_entities(
+    def get_annotation(
             self,
             input_ids: np.ndarray,
             word_ids,
             scores: np.ndarray,
+            label_list,
     ) -> List[dict]:
-        pre_entities = []
-        assert len(word_ids) == len(scores), "Eq problem 1"
-        assert len(word_ids) == len(input_ids), "Eq problem 2"
+        final_tags = []
+        assert len(word_ids) == len(scores), (
+            "Eq problem 1 \n"
+            f"word_ids : {word_ids}"
+            f"scores : {scores}"
+        )
+        assert len(word_ids) == len(input_ids),(
+            "Eq problem 2"
+            f"word_ids : {word_ids}"
+            f"input_ids : {input_ids}"
+        )
+        prev_word_id = None
+        labels = [label_list[sc.argmax()] for sc in scores]
         for idx, token_scores in enumerate(scores):
             token = self.tokenizer.convert_ids_to_tokens(int(input_ids[idx]))
-            pre_entity = {
-                "token": token,
-                "index": idx,
-                "word_id": word_ids[idx],
-                "scores": token_scores,
-            }
-            pre_entities.append(pre_entity)
-        return pre_entities
+            word_id = word_ids[idx]
+            if isinstance(word_id, int) and word_id != prev_word_id:
+                label_idx = token_scores.argmax()
+                label = label_list[label_idx]
+                final_tags.append(label)
+            prev_word_id = word_id
+        return final_tags
 
     def attach_tags(self, pre_entities: List[dict], label_list) -> List[dict]:
         entities = []
         for pre_entity in pre_entities:
             label_idx = pre_entity["scores"].argmax()
-            score = pre_entity["scores"][entity_idx]
+            score = pre_entity["scores"][label_idx]
             entity = {
                 "label": label_list[label_idx], # self.model.config.id2label[entity_idx],
                 "score": score,
@@ -250,13 +258,10 @@ class TaggingPipeline(Pipeline):
         final_tags = []
         for entity in tagged_entities:
             word_idx =  entity["word_id"]
-            if word_idx is None:
-                previous_word_idx = word_idx
-                continue
-            elif word_idx != previous_word_idx:
+            if word_idx != previous_word_idx and word_idx is not None:
                 final_tags.append(entity["label"])
-                previous_word_idx = word_idx
-            else:
-                previous_word_idx = word_idx
-                continue
+            previous_word_idx = word_idx
+        print(len(final_tags))
+        print(len(tagged_entities))
+        print(final_tags)
         return final_tags

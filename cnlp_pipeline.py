@@ -121,22 +121,23 @@ def inference(pipeline_args):
     
     for ann_sent in annotated_sents:
         ann_encoding = tokenizer(
-            annotated_sent,
-            max_length=128,   # this and below two options need to be generalized   
+            ann_sent.split(' '),
+            max_length=128,   # this and below two options need to be generalized
+            return_tensors='pt',
             padding = "max_length",
             truncation=True,
             is_split_into_words=True,
         )
         
         for out_task, model in out_model_dict.items():
-            out_task_processor = cnlp_processors[task_name]()
+            out_task_processor = cnlp_processors[out_task]()
             out_task_labels = out_task_processor.get_labels()
             model_outputs = model(**ann_encoding)
             logits = model_outputs["logits"][0]
             scores = softmax(logits)
             out_label_idx = torch.argmax(scores).item()
-            print(out_task_labels[out_label_idx])
-            print(ann_sent)
+            label = out_task_labels[out_label_idx]
+            print(f"{label} : {ann_sent}")
             
             
 def evaluation(pipeline_args):
@@ -198,7 +199,6 @@ def model_dicts(models_dir, tokenizer):
     return taggers_dict, out_model_dict 
 
 def assemble(sentences, taggers_dict, axis_task):
-    print(sentences)
     return list(
         chain(
             *[_assemble(sent, taggers_dict, axis_task) for sent in sentences]
@@ -206,16 +206,13 @@ def assemble(sentences, taggers_dict, axis_task):
     )
 
 def _assemble(sentence, taggers_dict, axis_task):
-    print(sentence)
-    print(type(sentence))
     axis_pipe = taggers_dict[axis_task]
-    print(axis_pipe)
-    print(type(axis_pipe))
     axis_ann = axis_pipe(sentence)
     sig_ann_ls = []
     for task, pipeline in taggers_dict.items():
         if task != axis_task:
-            sig_ann_ls += pipeline(sentence)
+            sig_out= pipeline(sentence)
+            sig_ann_ls.append(sig_out)
     return merge_annotations(axis_ann, sig_ann_ls, sentence)
 
 def merge_annotations(axis_ann, sig_ann_ls, sentence):
@@ -223,16 +220,21 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
     for sig_ann in sig_ann_ls:
         raw_partitions = get_partitions(axis_ann, sig_ann)
         anafora_tagged = get_anafora_tags(raw_partitions, sentence)
-        merged_annotations += anafora_tagged
+        merged_annotations.append(" ".join(anafora_tagged))
+    return merged_annotations
             
-def get_partitions(axis_ann, sig_ann): 
-    def tag2idx(t1, t2):
+def get_partitions(axis_ann, sig_ann):
+    assert len(axis_ann) == len(sig_ann), "make sure"
+    def tag2idx(tag_pair):
+        t1, t2 = tag_pair
         if t1 != 'O' and t2 != 'O':
             ValueError("Overlapping tags!")
         elif t1 != 'O':
             return 1
         elif t2 != 'O':
             return 2
+        elif t1 == 'O' and t2 == 'O':
+            return 0
         else:
             ValueError(f"Something really strange happened: {t1}, {t2}")
     return map(tag2idx, zip(axis_ann, sig_ann))
@@ -240,14 +242,18 @@ def get_partitions(axis_ann, sig_ann):
 def get_anafora_tags(raw_partitions, sentence):
     span_begin = 0
     annotated_list = []
+    split_sent = sentence.split(' ') 
     for tag_idx, span_iter in groupby(raw_partitions):
         span_end = len(list(span_iter)) + span_begin
-        ann_span = sentence[span_begin:span_end] 
+        span = split_sent[span_begin:span_end]
+        ann_span = span
         if tag_idx == 1:
-            ann_span = ['<a1>'] + ann_span + ['</a1>'] 
+            ann_span = ['<a1>'] + span + ['</a1>'] 
         elif tag_idx == 2:
-            ann_span = ['<a2>'] + ann_span + ['</a2>']
+            ann_span = ['<a2>'] + span + ['</a2>']
         annotated_list.extend(ann_span)
+        span_begin = span_end
+    return annotated_list
         
 def get_sentences_and_labels(in_file : str, mode : str, task_processor): 
     if mode == "inf":
