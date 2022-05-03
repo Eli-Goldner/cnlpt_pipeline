@@ -194,23 +194,34 @@ def evaluation(pipeline_args):
     for key in out_model_dict.keys():
         sent_processor = key
 
-    _, sentences = get_sentences_and_labels(
+    labels, annotated_sents = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
-        mode="inf",
+        mode="eval",
         task_processor=cnlp_processors[sent_processor](),
     )
-    
+
+    model_pairs = get_model_pairs(labels, taggers_dict)
+    deannotated_sents = list(map(lambda s : re.sub(r"</?a[1-2]>", "", s), annotated_sents))
     # strip the sentence of tags
-    re.sub(r"</?a[1-2]>", "", new_sent)
+    
 
     pass
 
-
-def classify(labels, sentences):
+def get_model_pairs(labels, taggers_dict):
+    model_pairs = []
+    model_suffixes = [key.split('_')[-1] for key, value in taggers_dict.items()]
     def partial_match(s1, s2):
         part = min(len(s1), len(s2))
         return s1[:part] == s2[:part]
-    
+    for label in labels:
+        axis_tag, sig_tag = label.split('-')
+        axis_model = list(filter(lambda x : partial_match(x, axis_tag), model_suffixes))[0]
+        sig_model = list(filter(lambda x : partial_match(x, sig_tag), model_suffixes))[0]
+        model_pairs.append((axis_model, sig_model))
+    return model_pairs
+
+
+        
 
 def model_dicts(models_dir, tokenizer):    
     taggers_dict = {}
