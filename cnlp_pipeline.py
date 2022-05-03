@@ -79,9 +79,6 @@ def main():
     else:
         pipeline_args, = parser.parse_args_into_dataclasses()
 
-
-    print(pipeline_args)
-    print(type(pipeline_args))
     if pipeline_args.mode == "inf":
         inference(pipeline_args)
     elif pipeline_args.mode == "eval":
@@ -99,13 +96,20 @@ def inference(pipeline_args):
         add_prefix_space=True,
         additional_special_tokens=['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
     )
+
+
+    taggers_dict, out_model_dict = model_dicts(pipeline_args.models_dir, tokenizer)
+
+    sent_processor = None
+
+    for key in out_model_dict.keys():
+        sent_processor = key
     
     _, sentences = get_sentences_and_labels(
         in_file = pipeline_args.in_file,
         mode="inf",
+        task_processor = cnlp_processors[sent_processor](),
     )
-
-    taggers_dict, out_model_dict = model_dicts(pipeline_args.models_dir)
     
     annotated_sents = assemble(
         sentences,
@@ -147,14 +151,11 @@ def evaluation(pipeline_args):
         mode="inf",
     )
 
-    
-    
-    
-
     # strip the sentence of tags
     re.sub(r"</?a[1-2]>", "", new_sent)
 
     pass
+
 
 def classify(labels, sentences):
     def partial_match(s1, s2):
@@ -162,8 +163,7 @@ def classify(labels, sentences):
         return s1[:part] == s2[:part]
     
 
-
-def model_dicts(models_dir):    
+def model_dicts(models_dir, tokenizer):    
     taggers_dict = {}
     out_model_dict = {}
     
@@ -198,15 +198,20 @@ def model_dicts(models_dir):
     return taggers_dict, out_model_dict 
 
 def assemble(sentences, taggers_dict, axis_task):
+    print(sentences)
     return list(
         chain(
-            *[_assemble(sent, taggers_dict, axis_task) for sent
-              in sentences]
+            *[_assemble(sent, taggers_dict, axis_task) for sent in sentences]
         )
     )
 
 def _assemble(sentence, taggers_dict, axis_task):
-    axis_ann = taggers_dict[axis_task](sentence)
+    print(sentence)
+    print(type(sentence))
+    axis_pipe = taggers_dict[axis_task]
+    print(axis_pipe)
+    print(type(axis_pipe))
+    axis_ann = axis_pipe(sentence)
     sig_ann_ls = []
     for task, pipeline in taggers_dict.items():
         if task != axis_task:
@@ -219,8 +224,7 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
         raw_partitions = get_partitions(axis_ann, sig_ann)
         anafora_tagged = get_anafora_tags(raw_partitions, sentence)
         merged_annotations += anafora_tagged
-    return merged_annotations
-
+            
 def get_partitions(axis_ann, sig_ann): 
     def tag2idx(t1, t2):
         if t1 != 'O' and t2 != 'O':
@@ -245,7 +249,7 @@ def get_anafora_tags(raw_partitions, sentence):
             ann_span = ['<a2>'] + ann_span + ['</a2>']
         annotated_list.extend(ann_span)
         
-def get_sentences_and_labels(in_file : str, mode : str, task_processor=None): 
+def get_sentences_and_labels(in_file : str, mode : str, task_processor): 
     if mode == "inf":
         # 'test' let's us forget labels
         examples =  task_processor._create_examples(
@@ -273,7 +277,9 @@ def get_sentences_and_labels(in_file : str, mode : str, task_processor=None):
         
       
     if examples[0].text_b is None:
-        sentences = [example.text_a.split(' ') for example in examples]
+        # sentences = [example.text_a.split(' ') for example in examples]
+        # pipeline freaks out if it's already split
+        sentences = [example.text_a for example in examples]
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]
         

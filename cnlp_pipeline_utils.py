@@ -23,7 +23,7 @@ class TaggingArgumentHandler(ArgumentHandler):
     """
 
     def __call__(self, inputs: Union[str, List[str]], **kwargs):
-
+        
         if inputs is not None and isinstance(inputs, (list, tuple)) and len(inputs) > 0:
             inputs = list(inputs)
             batch_size = len(inputs)
@@ -35,10 +35,10 @@ class TaggingArgumentHandler(ArgumentHandler):
         else:
             raise ValueError("At least one input is required.")
         
-        task_processor = kwargs.get("task_processor")
-        if task_processor is None:
-            raise ValueError("Pipelining with Cnlpt requires the task's cnlp_processor")
-        return inputs, task_processor
+        # task_processor = kwargs.get("task_processor")
+        # if task_processor is None:
+        #    raise ValueError("Pipelining with Cnlpt requires the task's cnlp_processor")
+        return inputs # , task_processor
 
 
 @add_end_docstrings(
@@ -96,7 +96,7 @@ class TaggingPipeline(Pipeline):
             else MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
         )
         """
-        #self._basic_tokenizer = BasicTokenizer(do_lower_case=False)
+        
         self._args_parser = args_parser
 
     def _sanitize_parameters(
@@ -110,8 +110,8 @@ class TaggingPipeline(Pipeline):
 
         if task_processor is not None:
             postprocess_params["task_processor"] = task_processor
-        else:
-            raise ValueError("Task_processor required!")
+        elif "task_processor" not in self._postprocess_params:
+            raise ValueError("Task_processor was never initialized")
 
         return preprocess_params, {}, postprocess_params
 
@@ -138,15 +138,16 @@ class TaggingPipeline(Pipeline):
               exists if the offsets are available within the tokenizer
         """
 
-        _inputs, task_processor = self._args_parser(inputs, **kwargs)
-        if offset_mapping:
-            kwargs["task_processor"] = task_processor
-
+        _inputs = self._args_parser(inputs, **kwargs)
+        print(f"_inputs: {_inputs}")
         return super().__call__(inputs, **kwargs)
 
     def preprocess(self, sentence):
+        print(sentence)
+        #print(self.model)
+        #print(self.tokenizer)
         model_inputs = self.tokenizer(
-            sentences,
+            sentence,
             max_length = 128, # hardcoding cnlp_data DataTrainingArguments default max_seq_length for now
             # maybe this means that other args would be preprocess params?
             padding = "max_length",
