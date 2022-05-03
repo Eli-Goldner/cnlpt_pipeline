@@ -230,11 +230,15 @@ class TaggingPipeline(Pipeline):
         for idx, token_scores in enumerate(scores):
             token = self.tokenizer.convert_ids_to_tokens(int(input_ids[idx]))
             word_id = word_ids[idx]
-            if isinstance(word_id, int) and word_id != prev_word_id:
+            # reason for three conditions allows for the last tag to get seen
+            if word_id is None:
+                prev_word_id = word_id
+            elif word_id != prev_word_id:
                 label_idx = token_scores.argmax()
                 label = label_list[label_idx]
                 final_tags.append(label)
-            prev_word_id = word_id
+            else:
+                prev_word_id = word_id
         return final_tags
 
     def attach_tags(self, pre_entities: List[dict], label_list) -> List[dict]:
