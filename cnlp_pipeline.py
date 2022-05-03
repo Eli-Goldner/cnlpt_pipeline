@@ -2,12 +2,19 @@ import os
 import re
 import torch
 import sys
+import types
+from typing import List, Optional, Union
 
 from dataclasses import dataclass, field
 
-from .cnlp_pipeline_utils import TaggingPipeline
+from .cnlp_pipeline_utils import TaggingPipeline, ctakes_tok
 
-from .cnlp_processors import cnlp_processors, cnlp_output_modes, cnlp_compute_metrics, tagging, relex, classification
+from .cnlp_processors import (
+    cnlp_processors,
+    cnlp_output_modes,
+    tagging,
+    classification
+)
 
 from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
 
@@ -15,7 +22,10 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel, HfArgumentParser
 
 from itertools import chain, groupby
 
-modes=["inf", "eval"]
+SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
+
+modes = ["inf", "eval"]
+
 
 @dataclass
 class PipelineArguments:
@@ -24,58 +34,72 @@ class PipelineArguments:
     """
     models_dir: str = field(
         metadata={
-            "help" : (
-                "Path where each entity model is stored in a folder named after its cnlp_processor,"
+            "help": (
+                "Path where each entity model is stored"
+                "in a folder named after its corresponding cnlp_processor,"
                 "models with a 'tagging' output mode will be run first"
-                "followed by models with a 'classification' ouput mode over the assembled data"
+                "followed by models with a 'classification'"
+                "ouput mode over the assembled data"
             )
         }
     )
     in_file: str = field(
-        metadata = {
-            "help" : (
-                "Path to file with one raw sentence per line in the case of inference,"
-                " and one <label>\t<annotated sentence> per line in the case of evaluation"
+        metadata={
+            "help": (
+                "Path to file, with one raw sentence"
+                "per line in the case of inference,"
+                " and one <label>\t<annotated sentence> "
+                "per line in the case of evaluation"
             )
         }
     )
     mode: str = field(
-        default = "inf",
-        metadata = {
-            "help" : (
-                "Use mode for full pipeline, inference which outputs annotated sentences and their relation,"
-                "or eval which outputs metrics for a provided set of samples (requires labels)"
+        default="inf",
+        metadata={
+            "help": (
+                "Use mode for full pipeline, "
+                "inference, which outputs annotated sentences"
+                "and their relation, or eval, "
+                "which outputs metrics for a provided set of samples "
+                "(requires labels)"
             )
         }
     )
     tokenizer: str = field(
         default="roberta-base",
-        metadata = {
-            "help" : (
-                "At the moment, assuming everything has been trained using the same tokenizer."
-                "Figuring out ways around this later might be annoying, including saving each tokenizer"
-                "in each model dir"
+        metadata={
+            "help": (
+                "NEEDS TO BE DELETED (each tokenizer in model folder)"
             )
         }
     )
     axis_task: str = field(
-        default = "dphe_med",
-        metadata = {
-            "help" : (
-                "key of the task in cnlp_processors which generates the tag that will map to <a1> <mention> </a1> in pairwise annotations"
+        default="dphe_med",
+        metadata={
+            "help": (
+                "key of the task in cnlp_processors "
+                "which generates the tag that will map to <a1> <mention> </a1>"
+                " in pairwise annotations"
             )
         }
     )
-    
+
+
 def main():
     parser = HfArgumentParser(PipelineArguments)
 
-    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
+    if (
+            len(sys.argv) == 2
+            and sys.argv[1].endswith(".json")
+    ):
+        # If we pass only one argument to the script
+        # and it's the path to a json file,
         # let's parse it to get our arguments.
 
-        #the ',' is to deal with unary tuple weirdness
-        pipeline_args, = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        # the ',' is to deal with unary tuple weirdness
+        pipeline_args, = parser.parse_json_file(
+            json_file=os.path.abspath(sys.argv[1])
+        )
     else:
         pipeline_args, = parser.parse_args_into_dataclasses()
 
@@ -86,6 +110,7 @@ def main():
     else:
         ValueError("Invalid pipe mode!")
 
+
 def inference(pipeline_args):
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
@@ -94,41 +119,43 @@ def inference(pipeline_args):
         pipeline_args.tokenizer,
         # cache_dir=model_args.cache_dir,
         add_prefix_space=True,
-        additional_special_tokens=['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
+        additional_special_tokens=SPECIAL_TOKENS,
     )
 
-
-    taggers_dict, out_model_dict = model_dicts(pipeline_args.models_dir, tokenizer)
+    taggers_dict, out_model_dict = model_dicts(
+        pipeline_args.models_dir,
+        tokenizer
+    )
 
     sent_processor = None
 
     for key in out_model_dict.keys():
         sent_processor = key
-    
+
     _, sentences = get_sentences_and_labels(
-        in_file = pipeline_args.in_file,
+        in_file=pipeline_args.in_file,
         mode="inf",
-        task_processor = cnlp_processors[sent_processor](),
+        task_processor=cnlp_processors[sent_processor](),
     )
-    
+
     annotated_sents = assemble(
         sentences,
         taggers_dict,
         pipeline_args.axis_task,
     )
 
-    softmax = torch.nn.Softmax(dim = 1)
-    
+    softmax = torch.nn.Softmax(dim=1)
+
     for ann_sent in annotated_sents:
         ann_encoding = tokenizer(
-            ann_sent.split(' '),
-            max_length=128,   # this and below two options need to be generalized
+            ctakes_tok(ann_sent),
+            max_length=128,   # UN-HARDCODE
             return_tensors='pt',
-            padding = "max_length",
+            padding="max_length",
             truncation=True,
             is_split_into_words=True,
         )
-        
+
         for out_task, model in out_model_dict.items():
             out_task_processor = cnlp_processors[out_task]()
             out_task_labels = out_task_processor.get_labels()
@@ -138,20 +165,41 @@ def inference(pipeline_args):
             out_label_idx = torch.argmax(scores).item()
             label = out_task_labels[out_label_idx]
             print(f"{label} : {ann_sent}")
-            
-            
+
+
 def evaluation(pipeline_args):
     # holding off on this for now
 
     # used to get the relevant models from the label name,
     # e.g. med-dosage -> med, dosage -> dphe-med, dphe-dosage,
-    # -> taggers_dict[dphe-med], taggers_dict[dphe-dosage] 
+    # -> taggers_dict[dphe-med], taggers_dict[dphe-dosage]
 
-    labels, sentences = get_sentences_and_labels(
-        in_file = pipeline_args.in_file,
-        mode="inf",
+    AutoConfig.register("cnlpt", CnlpConfig)
+    AutoModel.register(CnlpConfig, CnlpModelForClassification)
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        pipeline_args.tokenizer,
+        # cache_dir=model_args.cache_dir,
+        add_prefix_space=True,
+        additional_special_tokens=SPECIAL_TOKENS,
     )
 
+    taggers_dict, out_model_dict = model_dicts(
+        pipeline_args.models_dir,
+        tokenizer
+    )
+
+    sent_processor = None
+
+    for key in out_model_dict.keys():
+        sent_processor = key
+
+    _, sentences = get_sentences_and_labels(
+        in_file=pipeline_args.in_file,
+        mode="inf",
+        task_processor=cnlp_processors[sent_processor](),
+    )
+    
     # strip the sentence of tags
     re.sub(r"</?a[1-2]>", "", new_sent)
 
@@ -242,7 +290,7 @@ def get_partitions(axis_ann, sig_ann):
 def get_anafora_tags(raw_partitions, sentence):
     span_begin = 0
     annotated_list = []
-    split_sent = sentence.split(' ') 
+    split_sent = ctakes_tok(sentence) 
     for tag_idx, span_iter in groupby(raw_partitions):
         span_end = len(list(span_iter)) + span_begin
         span = split_sent[span_begin:span_end]
