@@ -167,6 +167,8 @@ def get_eval_predictions(
             is_split_into_words=True,
         )
 
+    out_labels = None
+    
     for out_task, model in out_model_dict.items():
             model.eval() # wew lad
             out_task_processor = cnlp_processors[out_task]()
@@ -178,32 +180,10 @@ def get_eval_predictions(
             out_label_idxs = scores.argmax(dim=-1)
             labels = [out_task_labels[idx.item()] for idx in out_label_idxs]
 
-            for label, ann_sent in zip(labels, reannotated_sents):
-                print(f"{label} : {ann_sent}")
-
-    """
-    for ann_sent in annotated_sents:
-        ann_encoding = tokenizer(
-            ctakes_tok(ann_sent),
-            max_length=128,   # UN-HARDCODE
-            return_tensors='pt',
-            padding="max_length",
-            truncation=True,
-            is_split_into_words=True,
-        )
-
-        for out_task, model in out_model_dict.items():
-            model.eval() # wew lad
-            out_task_processor = cnlp_processors[out_task]()
-            out_task_labels = out_task_processor.get_labels()
-            with torch.no_grad():
-                model_outputs = model(**ann_encoding)
-            logits = model_outputs["logits"][0]
-            scores = softmax(logits)
-            out_label_idx = torch.argmax(scores).item()
-            label = out_task_labels[out_label_idx]
-            print(f"{label} : {ann_sent}")
-    """
+            # for label, ann_sent in zip(labels, reannotated_sents):
+            #    print(f"{label} : {ann_sent}")
+            out_labels = [idx.item() for idx in out_label_idxs]
+    return out_labels
     
             
 def get_sentences_and_labels(in_file : str, mode : str, task_processor): 

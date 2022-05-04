@@ -3,6 +3,8 @@ import re
 import torch
 import sys
 import types
+import json
+import numpy as np
 from typing import List, Optional, Union
 
 from dataclasses import dataclass, field
@@ -22,7 +24,8 @@ from .cnlp_processors import (
     cnlp_processors,
     cnlp_output_modes,
     tagging,
-    classification
+    classification,
+    acc_and_f1,
 )
 
 from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
@@ -228,7 +231,16 @@ def evaluation(pipeline_args):
         tokenizer,
         pipeline_args.axis_task,
     )
-    return 0
+    print(f"preds \n {type(predictions)} \n {predictions}")
+    print(f"labels \n {type(idx_labels)} \n {idx_labels}")
+    report = acc_and_f1(np.array(predictions), np.array(idx_labels))
+    print(report)
+    print(type(report))
+    print("acc : {report['acc']}")
+    print("token_f1 : {report['token_f1']}")
+    print("f1 : {report['f1']}")
+    print("report : \n")
+    print("{report['report']}")
 
 
 if __name__ == "__main__":
