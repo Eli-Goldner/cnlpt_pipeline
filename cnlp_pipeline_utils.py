@@ -1,180 +1,193 @@
+import os
+import re
+import torch
+import sys
 import types
 from typing import List, Optional, Union
-from itertools import groupby
 
-import numpy as np
+from dataclasses import dataclass, field
 
-from transformers.utils import add_end_docstrings
-from transformers.pipelines.base import (
-    PIPELINE_INIT_ARGS,
-    ArgumentHandler,
-    Dataset,
-    Pipeline,
+from .cnlp_processors import (
+    cnlp_processors,
+    cnlp_output_modes,
+    tagging,
+    classification
 )
 
-from transformers.data.processors.utils import DataProcessor
+from .pipelines.tagging import TaggingPipeline
+from .pipelines import ctakes_tok
 
-def ctakes_tok(s: str) -> List[str]:
-    # to deal with weird null hangers on
-    return [token for token in s.split() if token]
+from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
 
+from transformers import AutoConfig, AutoTokenizer, AutoModel, HfArgumentParser
 
-class TaggingArgumentHandler(ArgumentHandler):
-    """
-    Handles arguments for token classification.
-    """
+from itertools import chain, groupby
 
-    def __call__(self, inputs: Union[str, List[str]], **kwargs):
+SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
-        if (
-                inputs is not None and isinstance(inputs, (list, tuple))
-                and len(inputs) > 0
-        ):
-            inputs = list(inputs)
-        elif isinstance(inputs, str):
-            inputs = [inputs]
-        elif (
-                Dataset is not None and isinstance(inputs, Dataset)
-                or isinstance(inputs, types.GeneratorType)
-        ):
-            return inputs, None
-        else:
-            raise ValueError("At least one input is required.")
-
-        return inputs
+def get_model_pairs(labels, taggers_dict):
+    model_pairs = []
+    model_suffixes = [key.split('_')[-1] for key, value in taggers_dict.items()]
+    def partial_match(s1, s2):
+        part = min(len(s1), len(s2))
+        return s1[:part] == s2[:part]
+    for label in labels:
+        axis_tag, sig_tag = label.split('-')
+        axis_model = list(filter(lambda x : partial_match(x, axis_tag), model_suffixes))[0]
+        sig_model = list(filter(lambda x : partial_match(x, sig_tag), model_suffixes))[0]
+        model_pairs.append((axis_model, sig_model))
+    return model_pairs
 
 
-@add_end_docstrings(
-    PIPELINE_INIT_ARGS,
-    r"""
-        ignore_labels (`List[str]`, defaults to `["O"]`):
-            A list of labels to ignore.
-        task_processpr (`DataProcessor`, defaults to `None`):
-            cnlp_processor used to pull the task labels.
-    """,
-)
-class TaggingPipeline(Pipeline):
-    """
-    NER/Token Classification/Entity Tagging pipeline adapted for cnlpt models
-    """
+def model_dicts(models_dir, tokenizer):    
+    taggers_dict = {}
+    out_model_dict = {}
+    
+    for file in os.listdir(models_dir):
+        model_dir = os.path.join(models_dir, file)
+        task_name = str(file)
+        if os.path.isdir(model_dir) and task_name in cnlp_processors.keys():
 
-    default_input_names = "sequences"
+            config = AutoConfig.from_pretrained(
+                model_dir,
+            )
 
-    def __init__(
-            self,
-            args_parser=TaggingArgumentHandler(),
-            *args,
-            **kwargs
-    ):
-        super().__init__(*args, **kwargs)
-        self._args_parser = args_parser
+            model = CnlpModelForClassification.from_pretrained(
+                model_dir,
+                config=config,
+            )
 
-    def _sanitize_parameters(
-        self,
-        ignore_labels=None,
-        task_processor: Optional[DataProcessor] = None,
-    ):
-        preprocess_params = {}
+            task_processor = cnlp_processors[task_name]()
+            
+            if cnlp_output_modes[task_name] == tagging:
+                taggers_dict[task_name] = TaggingPipeline(
+                    model=model,
+                    tokenizer=tokenizer,
+                    task_processor=task_processor
+                )
+            elif cnlp_output_modes[task_name] == classification:
+                out_model_dict[task_name] = model
+            else:
+                ValueError(
+                    f"output mode {cnlp_output_modes[task_name]} not currently supported"
+                )
+    return taggers_dict, out_model_dict 
 
-        postprocess_params = {}
+def assemble(sentences, taggers_dict, axis_task):
+    return list(
+        chain(
+            *[_assemble(sent, taggers_dict, axis_task) for sent in sentences]
+        )
+    )
 
-        if task_processor is not None:
-            postprocess_params["task_processor"] = task_processor
-        elif "task_processor" not in self._postprocess_params:
-            raise ValueError("Task_processor was never initialized")
+def _assemble(sentence, taggers_dict, axis_task):
+    axis_pipe = taggers_dict[axis_task]
+    axis_ann = axis_pipe(sentence)
+    sig_ann_ls = []
+    for task, pipeline in taggers_dict.items():
+        if task != axis_task:
+            sig_out= pipeline(sentence)
+            sig_ann_ls.append(sig_out)
+    return merge_annotations(axis_ann, sig_ann_ls, sentence)
 
-        return preprocess_params, {}, postprocess_params
+def merge_annotations(axis_ann, sig_ann_ls, sentence):
+    merged_annotations = []
+    for sig_ann in sig_ann_ls:
+        raw_partitions = get_partitions(axis_ann, sig_ann)
+        anafora_tagged = get_anafora_tags(raw_partitions, sentence)
+        merged_annotations.append(" ".join(anafora_tagged))
+    return merged_annotations
+            
+def get_partitions(axis_ann, sig_ann):
+    assert len(axis_ann) == len(sig_ann), "make sure"
+    def tag2idx(tag_pair):
+        t1, t2 = tag_pair
+        if t1 != 'O' and t2 != 'O':
+            ValueError("Overlapping tags!")
+        elif t1 != 'O':
+            return 1
+        elif t2 != 'O':
+            return 2
+        elif t1 == 'O' and t2 == 'O':
+            return 0
+    return map(tag2idx, zip(axis_ann, sig_ann))
 
-    def __call__(self, inputs: Union[str, List[str]], **kwargs):
-        """
-        Flesh out - see HF code for format
-        """
-        # If an arg parsers results are never called
-        # in the forest but someone comments it
-        # does it still have side effects?
-        # _inputs = self._args_parser(inputs, **kwargs)
-        return super().__call__(inputs, **kwargs)
+def get_anafora_tags(raw_partitions, sentence):
+    span_begin = 0
+    annotated_list = []
+    split_sent = ctakes_tok(sentence) 
+    for tag_idx, span_iter in groupby(raw_partitions):
+        span_end = len(list(span_iter)) + span_begin
+        span = split_sent[span_begin:span_end]
+        ann_span = span
+        if tag_idx == 1:
+            ann_span = ['<a1>'] + span + ['</a1>'] 
+        elif tag_idx == 2:
+            ann_span = ['<a2>'] + span + ['</a2>']
+        annotated_list.extend(ann_span)
+        span_begin = span_end
+    return annotated_list
 
-    def preprocess(self, sentence):
-        model_inputs = self.tokenizer(
-            ctakes_tok(sentence),
-            max_length=128,  # UN-HARDCODE
-            return_tensors=self.framework,
+
+def get_eval_predictions(model_pairs, deannotated_sents, model_dict):
+
+    softmax = torch.nn.Softmax(dim=1)
+
+    for ann_sent in annotated_sents:
+        ann_encoding = tokenizer(
+            ctakes_tok(ann_sent),
+            max_length=128,   # UN-HARDCODE
+            return_tensors='pt',
             padding="max_length",
             truncation=True,
             is_split_into_words=True,
         )
 
-        # This is what we use for cnlpt/cTAKES based tagging
-        # rather than an aggregation strategy
-        model_inputs["word_ids"] = model_inputs.word_ids()
+        for out_task, model in out_model_dict.items():
+            model.eval() # wew lad
+            out_task_processor = cnlp_processors[out_task]()
+            out_task_labels = out_task_processor.get_labels()
+            with torch.no_grad():
+                model_outputs = model(**ann_encoding)
+            logits = model_outputs["logits"][0]
+            scores = softmax(logits)
+            out_label_idx = torch.argmax(scores).item()
+            label = out_task_labels[out_label_idx]
+            print(f"{label} : {ann_sent}")
 
-        return model_inputs
-
-    def _forward(self, model_inputs):
-        word_ids = model_inputs.pop("word_ids")
-        if self.framework == "tf":
-            logits = self.model(model_inputs.data)[0]
-        else:
-            logits = self.model(**model_inputs)[0]
-
-        return {
-            "logits": logits,
-            "word_ids": word_ids,
-            **model_inputs,
-        }
-
-    def postprocess(
-            self,
-            model_outputs,
-            task_processor: DataProcessor,
-            ignore_labels=None):
-        logits = model_outputs["logits"][0].numpy()
-        input_ids = model_outputs["input_ids"][0]
-        word_ids = model_outputs["word_ids"]
-
-        if task_processor is None:
-            raise ValueError("You guessed it!")
-
+            
+def get_sentences_and_labels(in_file : str, mode : str, task_processor): 
+    if mode == "inf":
+        # 'test' let's us forget labels
+        examples =  task_processor._create_examples(
+            task_processor._read_tsv(in_file),
+            "test"
+        )
+        labels = None
+    elif mode == "eval":
+        # 'dev' lets us get labels without running into issues of downsampling
+        examples = task_processor._create_examples(
+            task_processor._read_tsv(in_file),
+            "dev"
+        )
         label_list = task_processor.get_labels()
+        label_map = {label : i for i, label in enumerate(label_list)}
+        def example2label(example):
+            return [label_map[label] for label in example.label]
 
-        maxes = np.max(logits, axis=-1, keepdims=True)
-        shifted_exp = np.exp(logits - maxes)
-        scores = shifted_exp / shifted_exp.sum(axis=-1, keepdims=True)
-
-        return self.get_annotation(input_ids, word_ids, scores[0], label_list)
-
-    def get_annotation(
-            self,
-            input_ids: np.ndarray,
-            word_ids,
-            scores: np.ndarray,
-            label_list,
-    ) -> List[dict]:
-        final_tags = []
-        assert len(word_ids) == len(scores), (
-            "Eq problem 1 \n"
-            f"word_ids : {word_ids}"
-            f"scores : {scores}"
-        )
-        assert len(word_ids) == len(input_ids), (
-            "Eq problem 2"
-            f"word_ids : {word_ids}"
-            f"input_ids : {input_ids}"
-        )
-
-        prev_word_id = None
-
-        for idx, token_scores in enumerate(scores):
-            word_id = word_ids[idx]
-            # reason for three conditions allows for the last tag to get seen
-            if word_id is None:
-                prev_word_id = word_id
-            elif word_id != prev_word_id:
-                label_idx = token_scores.argmax()
-                label = label_list[label_idx]
-                final_tags.append(label)
-                prev_word_id = word_id
-            else:
-                prev_word_id = word_id
-        return final_tags
+        if examples[0].label:
+            labels = [example2label(example) for example in examples]
+        else:
+            ValueError("labels required for eval mode")
+    else:
+        ValueError("Mode must be either inference or eval")
+        
+      
+    if examples[0].text_b is None:
+        # sentences = [example.text_a.split(' ') for example in examples]
+        # pipeline freaks out if it's already split
+        sentences = [example.text_a for example in examples]
+    else:
+        sentences = [(example.text_a, example.text_b) for example in examples]
+        
+    return labels, sentences
