@@ -205,13 +205,18 @@ def evaluation(pipeline_args):
     for key in out_model_dict.keys():
         sent_processor = key
 
-    labels, annotated_sents = get_sentences_and_labels(
+    out_task_processor=cnlp_processors[sent_processor]()
+    
+    
+    idx_labels, str_labels, annotated_sents = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
-        task_processor=cnlp_processors[sent_processor](),
+        task_processor=out_task_processor,
     )
 
-    model_pairs = get_model_pairs(labels, taggers_dict)
+    
+    
+    model_pairs = get_model_pairs(str_labels, taggers_dict)
     deannotated_sents = list(map(lambda s : re.sub(r"</?a[1-2]>", "", s), annotated_sents))
     # strip the sentence of tags
     
@@ -220,6 +225,8 @@ def evaluation(pipeline_args):
         deannotated_sents,
         taggers_dict,
         out_model_dict,
+        tokenizer,
+        pipeline_args.axis_task,
     )
     return 0
 

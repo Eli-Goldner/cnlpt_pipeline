@@ -14,7 +14,7 @@ from transformers.pipelines.base import (
 
 from transformers.data.processors.utils import DataProcessor
 
-from .__init__ import ctakes_tok
+from pipelines import ctakes_tok
 
 class TaggingArgumentHandler(ArgumentHandler):
     """

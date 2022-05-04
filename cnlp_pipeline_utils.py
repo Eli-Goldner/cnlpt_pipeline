@@ -27,15 +27,27 @@ SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg
 
 def get_model_pairs(labels, taggers_dict):
     model_pairs = []
-    model_suffixes = [key.split('_')[-1] for key, value in taggers_dict.items()]
+    model_names = [key for key, value in taggers_dict.items()]
+    model_suffixes = [name.split('_')[-1] for name in model_names]
     def partial_match(s1, s2):
         part = min(len(s1), len(s2))
         return s1[:part] == s2[:part]
     for label in labels:
         axis_tag, sig_tag = label.split('-')
-        axis_model = list(filter(lambda x : partial_match(x, axis_tag), model_suffixes))[0]
-        sig_model = list(filter(lambda x : partial_match(x, sig_tag), model_suffixes))[0]
+        axis_model = list(
+            filter(
+                lambda x : partial_match(x.split('_')[-1], axis_tag),
+                model_names
+            )
+        )[0]
+        sig_model = list(
+            filter(
+                lambda x : partial_match(x.split('_')[-1], sig_tag),
+                model_names
+            )
+        )[0]
         model_pairs.append((axis_model, sig_model))
+    assert len(model_pairs) == len(labels), "Wrong lengths"
     return model_pairs
 
 
@@ -129,10 +141,47 @@ def get_anafora_tags(raw_partitions, sentence):
     return annotated_list
 
 
-def get_eval_predictions(model_pairs, deannotated_sents, model_dict):
-
+def get_eval_predictions(
+        model_pairs,
+        deannotated_sents,
+        taggers_dict,
+        out_model_dict,
+        tokenizer,
+        axis_task,
+):
+    reannotated_sents = []
+    for sent, pair in zip(deannotated_sents, model_pairs):
+        tagger_pair_dict = {key: taggers_dict[key] for key in pair}
+        reann_sent_ls = _assemble(sent, tagger_pair_dict, axis_task)
+        assert len(reann_sent_ls) == 1, "ASDASDDASDASDASD"
+        # tokenizing up here to save tokenizer time
+        reannotated_sents.append(ctakes_tok(reann_sent_ls[0]))
+        
     softmax = torch.nn.Softmax(dim=1)
+    ann_encoding = tokenizer(
+            reannotated_sents,
+            max_length=128,   # UN-HARDCODE
+            return_tensors='pt',
+            padding="max_length",
+            truncation=True,
+            is_split_into_words=True,
+        )
 
+    for out_task, model in out_model_dict.items():
+            model.eval() # wew lad
+            out_task_processor = cnlp_processors[out_task]()
+            out_task_labels = out_task_processor.get_labels()
+            with torch.no_grad():
+                model_outputs = model(**ann_encoding)
+            logits = model_outputs["logits"][0]
+            scores = softmax(logits)
+            out_label_idxs = scores.argmax(dim=-1)
+            labels = [out_task_labels[idx.item()] for idx in out_label_idxs]
+
+            for label, ann_sent in zip(labels, reannotated_sents):
+                print(f"{label} : {ann_sent}")
+
+    """
     for ann_sent in annotated_sents:
         ann_encoding = tokenizer(
             ctakes_tok(ann_sent),
@@ -154,7 +203,8 @@ def get_eval_predictions(model_pairs, deannotated_sents, model_dict):
             out_label_idx = torch.argmax(scores).item()
             label = out_task_labels[out_label_idx]
             print(f"{label} : {ann_sent}")
-
+    """
+    
             
 def get_sentences_and_labels(in_file : str, mode : str, task_processor): 
     if mode == "inf":
@@ -170,13 +220,18 @@ def get_sentences_and_labels(in_file : str, mode : str, task_processor):
             task_processor._read_tsv(in_file),
             "dev"
         )
+        
         label_list = task_processor.get_labels()
         label_map = {label : i for i, label in enumerate(label_list)}
         def example2label(example):
-            return [label_map[label] for label in example.label]
+            if isinstance(example.label, list):
+                return [label_map[label] for label in example.label]
+            else:
+                return label_map[example.label]
 
         if examples[0].label:
-            labels = [example2label(example) for example in examples]
+            idx_labels = [example2label(example) for example in examples]
+            str_labels = [example.label for example in examples]
         else:
             ValueError("labels required for eval mode")
     else:
@@ -190,4 +245,4 @@ def get_sentences_and_labels(in_file : str, mode : str, task_processor):
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]
         
-    return labels, sentences
+    return idx_labels, str_labels, sentences
