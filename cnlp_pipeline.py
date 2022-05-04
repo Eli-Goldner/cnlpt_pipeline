@@ -157,9 +157,11 @@ def inference(pipeline_args):
         )
 
         for out_task, model in out_model_dict.items():
+            model.eval() # wew lad
             out_task_processor = cnlp_processors[out_task]()
             out_task_labels = out_task_processor.get_labels()
-            model_outputs = model(**ann_encoding)
+            with torch.no_grad():
+                model_outputs = model(**ann_encoding)
             logits = model_outputs["logits"][0]
             scores = softmax(logits)
             out_label_idx = torch.argmax(scores).item()
