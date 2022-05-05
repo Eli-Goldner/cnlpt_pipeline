@@ -25,7 +25,7 @@ from .cnlp_processors import (
     cnlp_output_modes,
     tagging,
     classification,
-    acc_and_f1,
+    cnlp_compute_metrics,
 )
 
 from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
@@ -123,15 +123,10 @@ def inference(pipeline_args):
         pipeline_args.models_dir,
     )
 
-    sent_processor = None
-
-    for key in out_model_dict.keys():
-        sent_processor = key
-
     _, _, sentences = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="inf",
-        task_processor=cnlp_processors[sent_processor](),
+        task_names=out_model_dict.keys(),
     )
 
     annotated_sents = assemble(
@@ -164,40 +159,26 @@ def evaluation(pipeline_args):
         pipeline_args.models_dir
     )
 
-    sent_processor = None
-
-    for key in out_model_dict.keys():
-        sent_processor = key
-
-    out_task_processor=cnlp_processors[sent_processor]()
-    
-    
-    idx_labels, str_labels, annotated_sents = get_sentences_and_labels(
+    idx_labels_dict, str_labels_dict, annotated_sents = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
-        task_processor=out_task_processor,
+        task_names=out_model_dict.keys(),
     ) 
     
-    model_pairs = get_model_pairs(str_labels, taggers_dict)
+    model_pairs_dict = get_model_pairs(str_labels_dict, taggers_dict)
     deannotated_sents = list(map(lambda s : re.sub(r"</?a[1-2]>", "", s), annotated_sents))
     
-    predictions = get_eval_predictions(
-        model_pairs,
+    predictions_dict = get_eval_predictions(
+        model_pairs_dict,
         deannotated_sents,
         taggers_dict,
         out_model_dict,
         pipeline_args.axis_task,
     )
-    print(f"preds \n {type(predictions)} \n {predictions}")
-    print(f"labels \n {type(idx_labels)} \n {idx_labels}")
-    report = acc_and_f1(np.array(predictions), np.array(idx_labels))
-    print(report)
-    print(type(report))
-    print("acc : {report['acc']}")
-    print("token_f1 : {report['token_f1']}")
-    print("f1 : {report['f1']}")
-    print("report : \n")
-    print("{report['report']}")
+
+    for task_name, predictions in predictions_dict.items(): 
+        report = cnlp_compute_metrics(task_name, np.array(predictions), np.array(idx_labels_dict[task_name]))
+        print(report)
 
 
 if __name__ == "__main__":

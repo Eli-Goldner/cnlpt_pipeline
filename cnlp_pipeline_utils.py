@@ -26,29 +26,35 @@ from itertools import chain, groupby
 
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
-def get_model_pairs(labels, taggers_dict):
-    model_pairs = []
+def get_model_pairs(str_labels_dict, taggers_dict):
+    model_pairs = {}
     model_names = [key for key, value in taggers_dict.items()]
     model_suffixes = [name.split('_')[-1] for name in model_names]
     def partial_match(s1, s2):
         part = min(len(s1), len(s2))
         return s1[:part] == s2[:part]
-    for label in labels:
-        axis_tag, sig_tag = label.split('-')
-        axis_model = list(
-            filter(
-                lambda x : partial_match(x.split('_')[-1], axis_tag),
-                model_names
-            )
-        )[0]
-        sig_model = list(
-            filter(
-                lambda x : partial_match(x.split('_')[-1], sig_tag),
-                model_names
-            )
-        )[0]
-        model_pairs.append((axis_model, sig_model))
-    assert len(model_pairs) == len(labels), "Wrong lengths"
+    for task_name, labels in str_labels_dict.items():
+        model_pairs[task_name] = []
+        for label in labels:
+            axis_tag, sig_tag = label.split('-')
+            axis_model = list(
+                filter(
+                    lambda x : partial_match(x.split('_')[-1], axis_tag),
+                    model_names
+                )
+            )[0]
+            sig_model = list(
+                filter(
+                    lambda x : partial_match(x.split('_')[-1], sig_tag),
+                    model_names
+                )
+            )[0]
+            model_pairs[task_name].append((axis_model, sig_model))
+        assert len(model_pairs[task_name]) == len(str_labels_dict[task_name]), f(
+            "Wrong lengths"
+            f"task model pairs : {model_pairs[task_name]}"
+            f"task labels : {str_labels_dict[task_name]}"
+        )
     return model_pairs
 
 
@@ -72,13 +78,10 @@ def model_dicts(models_dir):
 
             # right now assume roberta
             tokenizer = AutoTokenizer.from_pretrained(
-                #pipeline_args.tokenizer,
                 model_dir,
-                # cache_dir=model_args.cache_dir,
                 add_prefix_space=True,
                 additional_special_tokens=SPECIAL_TOKENS,
             )
-
             
             task_processor = cnlp_processors[task_name]()
             
@@ -110,13 +113,17 @@ def assemble(sentences, taggers_dict, axis_task):
 def _assemble(sentence, taggers_dict, axis_task):
     axis_pipe = taggers_dict[axis_task]
     axis_ann = axis_pipe(sentence)
-    sig_ann_ls = []
-    for task, pipeline in taggers_dict.items():
-        if task != axis_task:
-            sig_out= pipeline(sentence)
-            sig_ann_ls.append(sig_out)
-    return merge_annotations(axis_ann, sig_ann_ls, sentence)
-
+    # filter out lack of anchor mentions here
+    ann_sents = []
+    if any(filter(lambda x : x.startswith('B'), axis_ann)):
+        sig_ann_ls = []
+        for task, pipeline in taggers_dict.items():
+            if task != axis_task:
+                sig_out= pipeline(sentence)
+                sig_ann_ls.append(sig_out)
+        ann_sents = merge_annotations(axis_ann, sig_ann_ls, sentence)
+    return ann_sents
+        
 def merge_annotations(axis_ann, sig_ann_ls, sentence):
     merged_annotations = []
     for sig_ann in sig_ann_ls:
@@ -144,37 +151,39 @@ def get_anafora_tags(raw_partitions, sentence):
     span_begin = 0
     annotated_list = []
     split_sent = ctakes_tok(sentence)
-    axis_seen, sig_seen = False, False 
+    sig_seen = False 
     for tag_idx, span_iter in groupby(raw_partitions):
         span_end = len(list(span_iter)) + span_begin
         span = split_sent[span_begin:span_end]
         ann_span = span
         if tag_idx == 1:
             ann_span = ['<a1>'] + span + ['</a1>']
-            axis_seen = True
         elif tag_idx == 2:
             ann_span = ['<a2>'] + span + ['</a2>']
             sig_seen = True
         annotated_list.extend(ann_span)
         span_begin = span_end
-    return annotated_list if axis_seen and sig_seen else None
+    return annotated_list if sig_seen else None
 
 
 def get_eval_predictions(
-        model_pairs,
+        model_pairs_dict,
         deannotated_sents,
         taggers_dict,
         out_model_dict,
         axis_task,
 ):
-    reannotated_sents = []
-    for sent, pair in zip(deannotated_sents, model_pairs):
-        tagger_pair_dict = {key: taggers_dict[key] for key in pair}
-        reann_sent_ls = _assemble(sent, tagger_pair_dict, axis_task)
-        assert len(reann_sent_ls) == 1, "ASDASDDASDASDASD"
-        reannotated_sents.append(reann_sent_ls[0])
+    reannotated_sents = {}
+    for task_name, task_model_pairs in model_pairs_dict.items():
+        reannotated_sents[task_name] = []
+        for sent, pair in zip(deannotated_sents, task_model_pairs):
+            tagger_pair_dict = {key: taggers_dict[key] for key in pair}
+            reann_sent_ls = _assemble(sent, tagger_pair_dict, axis_task)
+            assert len(reann_sent_ls) == 1, "Make sure _assemble doesn't misbehave"
+            reannotated_sents[task_name].append(reann_sent_ls[0])
     
     out_labels = None
+    predictions_dict = {}
     
     for out_task, out_pipe in out_model_dict.items():
 
@@ -184,45 +193,51 @@ def get_eval_predictions(
         out_label_map = {label : i for i, label in enumerate(out_task_labels)}
         
         pipe_output = out_pipe(
-            reannotated_sents,
-            max_length=128,   # UN-HARDCODE
+            reannotated_sents[out_task],
             padding="max_length",
             truncation=True,
             is_split_into_words=True,
         ) 
-        print(pipe_output)
+    
         out_labels = [out_label_map[record['label']] for record in pipe_output]
-    return out_labels
+        predictions_dict[out_task] = out_labels
+        
+    return predictions_dict
     
             
-def get_sentences_and_labels(in_file : str, mode : str, task_processor):
-    idx_labels, str_labels = None, None
+def get_sentences_and_labels(in_file : str, mode : str, task_names):
+    task_processors = [cnlp_processors[task_name]() for task_name in task_names]
+    idx_labels_dict, str_labels_dict = {}, {}
     if mode == "inf":
         # 'test' let's us forget labels
-        examples =  task_processor._create_examples(
-            task_processor._read_tsv(in_file),
+        # just use the first task processor since
+        # _create_examples and _read_tsv are label agnostic
+        examples =  task_processors[0]._create_examples(
+            task_processors[0]._read_tsv(in_file),
             "test"
         )
     elif mode == "eval":
         # 'dev' lets us get labels without running into issues of downsampling
-        examples = task_processor._create_examples(
-            task_processor._read_tsv(in_file),
+        examples = task_processors[0]._create_examples(
+            task_processors[0]._read_tsv(in_file),
             "dev"
         )
-        
-        label_list = task_processor.get_labels()
-        label_map = {label : i for i, label in enumerate(label_list)}
+
         def example2label(example):
             if isinstance(example.label, list):
                 return [label_map[label] for label in example.label]
             else:
                 return label_map[example.label]
 
-        if examples[0].label:
-            idx_labels = [example2label(example) for example in examples]
-            str_labels = [example.label for example in examples]
-        else:
-            ValueError("labels required for eval mode")
+        for task_name, task_processor in zip(task_names, task_processors):
+            label_list = task_processor.get_labels()
+            label_map = {label : i for i, label in enumerate(label_list)}
+        
+            if examples[0].label:
+                idx_labels_dict[task_name] = [example2label(example) for example in examples]
+                str_labels_dict[task_name] = [example.label for example in examples]
+            else:
+                ValueError("labels required for eval mode")
     else:
         ValueError("Mode must be either inference or eval")
         
@@ -232,4 +247,4 @@ def get_sentences_and_labels(in_file : str, mode : str, task_processor):
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]
         
-    return idx_labels, str_labels, sentences
+    return idx_labels_dict, str_labels_dict, sentences
