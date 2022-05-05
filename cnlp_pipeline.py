@@ -77,14 +77,6 @@ class PipelineArguments:
             )
         }
     )
-    tokenizer: str = field(
-        default="roberta-base",
-        metadata={
-            "help": (
-                "NEEDS TO BE DELETED (each tokenizer in model folder)"
-            )
-        }
-    )
     axis_task: str = field(
         default="dphe_med",
         metadata={
@@ -151,7 +143,6 @@ def inference(pipeline_args):
     for out_task, out_pipe in out_model_dict.items():
         pipe_output = out_pipe(
             annotated_sents,
-            max_length=128,   # UN-HARDCODE
             padding="max_length",
             truncation=True,
             is_split_into_words=True,
@@ -159,45 +150,15 @@ def inference(pipeline_args):
 
         for out, sent in zip(pipe_output, annotated_sents):
             print(f"{out['label']} : {sent}")
-        """
-            ann_encoding = tokenizer(
-                ctakes_tok(ann_sent),
-                max_length=128,   # UN-HARDCODE
-                return_tensors='pt',
-                padding="max_length",
-                truncation=True,
-                is_split_into_words=True,
-            )
-            
-            model.eval() # wew lad
-            out_task_processor = cnlp_processors[out_task]()
-            out_task_labels = out_task_processor.get_labels()
-            with torch.no_grad():
-                model_outputs = model(**ann_encoding)
-            logits = model_outputs["logits"][0]
-            scores = softmax(logits)
-            out_label_idx = torch.argmax(scores).item()
-            label = out_task_labels[out_label_idx]
-            print(f"{label} : {ann_sent}")
-        """
 
 
 def evaluation(pipeline_args):
-    # holding off on this for now
-
     # used to get the relevant models from the label name,
     # e.g. med-dosage -> med, dosage -> dphe-med, dphe-dosage,
     # -> taggers_dict[dphe-med], taggers_dict[dphe-dosage]
 
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        pipeline_args.tokenizer,
-        # cache_dir=model_args.cache_dir,
-        add_prefix_space=True,
-        additional_special_tokens=SPECIAL_TOKENS,
-    )
 
     taggers_dict, out_model_dict = model_dicts(
         pipeline_args.models_dir
@@ -215,13 +176,10 @@ def evaluation(pipeline_args):
         in_file=pipeline_args.in_file,
         mode="eval",
         task_processor=out_task_processor,
-    )
-
-    
+    ) 
     
     model_pairs = get_model_pairs(str_labels, taggers_dict)
     deannotated_sents = list(map(lambda s : re.sub(r"</?a[1-2]>", "", s), annotated_sents))
-    # strip the sentence of tags
     
     predictions = get_eval_predictions(
         model_pairs,

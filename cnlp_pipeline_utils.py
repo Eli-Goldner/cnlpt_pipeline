@@ -173,18 +173,6 @@ def get_eval_predictions(
         reann_sent_ls = _assemble(sent, tagger_pair_dict, axis_task)
         assert len(reann_sent_ls) == 1, "ASDASDDASDASDASD"
         reannotated_sents.append(reann_sent_ls[0])
-
-    """
-    softmax = torch.nn.Softmax(dim=1)
-    ann_encoding = tokenizer(
-            reannotated_sents,
-            max_length=128,   # UN-HARDCODE
-            return_tensors='pt',
-            padding="max_length",
-            truncation=True,
-            is_split_into_words=True,
-        )
-    """
     
     out_labels = None
     
@@ -202,11 +190,6 @@ def get_eval_predictions(
             truncation=True,
             is_split_into_words=True,
         ) 
-        # labels = [out_task_labels[idx.item()] for idx in out_label_idxs]
-        
-        # for label, ann_sent in zip(labels, reannotated_sents):
-        #    print(f"{label} : {ann_sent}")
-        # out_labels = [idx.item() for idx in out_label_idxs]
         print(pipe_output)
         out_labels = [out_label_map[record['label']] for record in pipe_output]
     return out_labels
@@ -245,8 +228,6 @@ def get_sentences_and_labels(in_file : str, mode : str, task_processor):
         
       
     if examples[0].text_b is None:
-        # sentences = [example.text_a.split(' ') for example in examples]
-        # pipeline freaks out if it's already split
         sentences = [example.text_a for example in examples]
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]

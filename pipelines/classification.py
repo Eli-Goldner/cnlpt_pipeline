@@ -140,7 +140,7 @@ class ClassificationPipeline(Pipeline):
         return_tensors = self.framework
         return self.tokenizer(
             ctakes_tok(inputs),
-            # max_length=128
+            max_length=self.tokenizer.model_max_length, # not sure how to pass this one upstream
             return_tensors=return_tensors,
             # pass these upstream with __call__(**kwargs)
             # padding="max_length",

@@ -95,7 +95,7 @@ class TaggingPipeline(Pipeline):
     def preprocess(self, sentence):
         model_inputs = self.tokenizer(
             ctakes_tok(sentence),
-            max_length=128,  # UN-HARDCODE
+            max_length=self.tokenizer.model_max_length,
             return_tensors=self.framework,
             padding="max_length",
             truncation=True,
