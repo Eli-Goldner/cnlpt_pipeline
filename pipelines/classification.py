@@ -1,18 +1,16 @@
-from typing import Dict
+from typing import Optional, Dict
 
 import numpy as np
 
-from ..utils import ExplicitEnum, add_end_docstrings, is_tf_available, is_torch_available
-from .base import PIPELINE_INIT_ARGS, GenericTensor, Pipeline
+from transformers.utils import ExplicitEnum, add_end_docstrings
+from transformers.pipelines.base import (
+    PIPELINE_INIT_ARGS,
+    GenericTensor,
+    Pipeline,
+)
+from transformers.data.processors.utils import DataProcessor
 
-
-if is_tf_available():
-    from ..models.auto.modeling_tf_auto import TF_MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING
-
-if is_torch_available():
-    from ..models.auto.modeling_auto import MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING
-
-from ..cnlp_pipeline_utils import ctakes_tok
+from .__init__ import ctakes_tok
 
 def sigmoid(_outputs):
     return 1.0 / (1.0 + np.exp(-_outputs))
@@ -45,7 +43,7 @@ class ClassificationFunction(ExplicitEnum):
             - `"none"`: Does not apply any function on the output.
     """,
 )
-class TextClassificationPipeline(Pipeline):
+class ClassificationPipeline(Pipeline):
     """
     Text classification pipeline using any `ModelForSequenceClassification`. See the [sequence classification
     examples](../task_summary#sequence-classification) for more information.
@@ -67,13 +65,14 @@ class TextClassificationPipeline(Pipeline):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.check_model_type(
-            TF_MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING
-            if self.framework == "tf"
-            else MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING
-        )
-
-    def _sanitize_parameters(self, return_all_scores=None, function_to_apply=None, **tokenizer_kwargs):
+        
+    def _sanitize_parameters(
+            self,
+            return_all_scores=None,
+            function_to_apply=None,
+            task_processor: Optional[DataProcessor] = None,
+            **tokenizer_kwargs
+    ):
         preprocess_params = tokenizer_kwargs
 
         postprocess_params = {}
@@ -88,6 +87,13 @@ class TextClassificationPipeline(Pipeline):
 
         if function_to_apply is not None:
             postprocess_params["function_to_apply"] = function_to_apply
+
+        if task_processor is not None:
+            postprocess_params["task_processor"] = task_processor
+        elif "task_processor" not in self._postprocess_params:
+            raise ValueError("Task_processor was never initialized")
+
+
         return preprocess_params, {}, postprocess_params
 
     def __call__(self, *args, **kwargs):
@@ -132,13 +138,31 @@ class TextClassificationPipeline(Pipeline):
 
     def preprocess(self, inputs, **tokenizer_kwargs) -> Dict[str, GenericTensor]:
         return_tensors = self.framework
-        return self.tokenizer(inputs, return_tensors=return_tensors, **tokenizer_kwargs)
+        return self.tokenizer(
+            ctakes_tok(inputs),
+            # max_length=128
+            return_tensors=return_tensors,
+            # pass these upstream with __call__(**kwargs)
+            # padding="max_length",
+            # truncation=True,
+            # is_split_into_words=True
+            **tokenizer_kwargs
+        )
 
     def _forward(self, model_inputs):
         return self.model(**model_inputs)
 
-    def postprocess(self, model_outputs, function_to_apply=None, return_all_scores=False):
+    def postprocess(
+            self,
+            model_outputs,
+            # function_to_apply=None,
+            task_processor: DataProcessor,
+            return_all_scores=False,
+    ):
         # Default value before `set_parameters`
+        label_list = task_processor.get_labels()
+
+        """
         if function_to_apply is None:
             if self.model.config.problem_type == "multi_label_classification" or self.model.config.num_labels == 1:
                 function_to_apply = ClassificationFunction.SIGMOID
@@ -148,7 +172,15 @@ class TextClassificationPipeline(Pipeline):
                 function_to_apply = self.model.config.function_to_apply
             else:
                 function_to_apply = ClassificationFunction.NONE
+        """
 
+        if len(label_list) == 1:
+            function_to_apply = ClassificationFunction.SIGMOID
+        elif len(label_list)  > 1:
+            function_to_apply = ClassificationFunction.SOFTMAX
+        else:
+            function_to_apply = ClassificationFunction.NONE
+ 
         outputs = model_outputs["logits"][0]
         outputs = outputs.numpy()
 
@@ -162,6 +194,6 @@ class TextClassificationPipeline(Pipeline):
             raise ValueError(f"Unrecognized `function_to_apply` argument: {function_to_apply}")
 
         if return_all_scores:
-            return [{"label": self.model.config.id2label[i], "score": score.item()} for i, score in enumerate(scores)]
+            return [{"label": label_list[i], "score": score.item()} for i, score in enumerate(scores)]
         else:
-            return {"label": self.model.config.id2label[scores.argmax().item()], "score": scores.max().item()}
+            return {"label": label_list[scores.argmax().item()], "score": scores.max().item()}

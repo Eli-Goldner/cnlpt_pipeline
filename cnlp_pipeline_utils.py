@@ -15,6 +15,7 @@ from .cnlp_processors import (
 )
 
 from .pipelines.tagging import TaggingPipeline
+from .pipelines.classification import ClassificationPipeline
 from .pipelines import ctakes_tok
 
 from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
@@ -51,7 +52,7 @@ def get_model_pairs(labels, taggers_dict):
     return model_pairs
 
 
-def model_dicts(models_dir, tokenizer):    
+def model_dicts(models_dir):    
     taggers_dict = {}
     out_model_dict = {}
     
@@ -69,6 +70,16 @@ def model_dicts(models_dir, tokenizer):
                 config=config,
             )
 
+            # right now assume roberta
+            tokenizer = AutoTokenizer.from_pretrained(
+                #pipeline_args.tokenizer,
+                model_dir,
+                # cache_dir=model_args.cache_dir,
+                add_prefix_space=True,
+                additional_special_tokens=SPECIAL_TOKENS,
+            )
+
+            
             task_processor = cnlp_processors[task_name]()
             
             if cnlp_output_modes[task_name] == tagging:
@@ -78,7 +89,11 @@ def model_dicts(models_dir, tokenizer):
                     task_processor=task_processor
                 )
             elif cnlp_output_modes[task_name] == classification:
-                out_model_dict[task_name] = model
+                out_model_dict[task_name] = ClassificationPipeline(
+                    model=model,
+                    tokenizer=tokenizer,
+                    task_processor=task_processor
+                )
             else:
                 ValueError(
                     f"output mode {cnlp_output_modes[task_name]} not currently supported"
@@ -146,7 +161,6 @@ def get_eval_predictions(
         deannotated_sents,
         taggers_dict,
         out_model_dict,
-        tokenizer,
         axis_task,
 ):
     reannotated_sents = []
@@ -154,9 +168,9 @@ def get_eval_predictions(
         tagger_pair_dict = {key: taggers_dict[key] for key in pair}
         reann_sent_ls = _assemble(sent, tagger_pair_dict, axis_task)
         assert len(reann_sent_ls) == 1, "ASDASDDASDASDASD"
-        # tokenizing up here to save tokenizer time
-        reannotated_sents.append(ctakes_tok(reann_sent_ls[0]))
-        
+        reannotated_sents.append(reann_sent_ls[0])
+
+    """
     softmax = torch.nn.Softmax(dim=1)
     ann_encoding = tokenizer(
             reannotated_sents,
@@ -166,34 +180,42 @@ def get_eval_predictions(
             truncation=True,
             is_split_into_words=True,
         )
-
+    """
+    
     out_labels = None
     
-    for out_task, model in out_model_dict.items():
-            model.eval() # wew lad
-            out_task_processor = cnlp_processors[out_task]()
-            out_task_labels = out_task_processor.get_labels()
-            with torch.no_grad():
-                model_outputs = model(**ann_encoding)
-            logits = model_outputs["logits"][0]
-            scores = softmax(logits)
-            out_label_idxs = scores.argmax(dim=-1)
-            labels = [out_task_labels[idx.item()] for idx in out_label_idxs]
+    for out_task, out_pipe in out_model_dict.items():
 
-            # for label, ann_sent in zip(labels, reannotated_sents):
-            #    print(f"{label} : {ann_sent}")
-            out_labels = [idx.item() for idx in out_label_idxs]
+        out_task_processor = cnlp_processors[out_task]()
+        out_task_labels = out_task_processor.get_labels()
+
+        out_label_map = {label : i for i, label in enumerate(out_task_labels)}
+        
+        pipe_output = out_pipe(
+            reannotated_sents,
+            max_length=128,   # UN-HARDCODE
+            padding="max_length",
+            truncation=True,
+            is_split_into_words=True,
+        ) 
+        # labels = [out_task_labels[idx.item()] for idx in out_label_idxs]
+        
+        # for label, ann_sent in zip(labels, reannotated_sents):
+        #    print(f"{label} : {ann_sent}")
+        # out_labels = [idx.item() for idx in out_label_idxs]
+        print(pipe_output)
+        out_labels = [out_label_map[record['label']] for record in pipe_output]
     return out_labels
     
             
-def get_sentences_and_labels(in_file : str, mode : str, task_processor): 
+def get_sentences_and_labels(in_file : str, mode : str, task_processor):
+    idx_labels, str_labels = None, None
     if mode == "inf":
         # 'test' let's us forget labels
         examples =  task_processor._create_examples(
             task_processor._read_tsv(in_file),
             "test"
         )
-        labels = None
     elif mode == "eval":
         # 'dev' lets us get labels without running into issues of downsampling
         examples = task_processor._create_examples(

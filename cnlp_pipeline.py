@@ -127,16 +127,17 @@ def inference(pipeline_args):
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
+    """
     tokenizer = AutoTokenizer.from_pretrained(
         pipeline_args.tokenizer,
         # cache_dir=model_args.cache_dir,
         add_prefix_space=True,
         additional_special_tokens=SPECIAL_TOKENS,
     )
-
+    """
+    
     taggers_dict, out_model_dict = model_dicts(
         pipeline_args.models_dir,
-        tokenizer
     )
 
     sent_processor = None
@@ -144,7 +145,7 @@ def inference(pipeline_args):
     for key in out_model_dict.keys():
         sent_processor = key
 
-    _, sentences = get_sentences_and_labels(
+    _, _, sentences = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="inf",
         task_processor=cnlp_processors[sent_processor](),
@@ -158,17 +159,27 @@ def inference(pipeline_args):
 
     softmax = torch.nn.Softmax(dim=1)
 
-    for ann_sent in annotated_sents:
-        ann_encoding = tokenizer(
-            ctakes_tok(ann_sent),
+    for out_task, out_pipe in out_model_dict.items():
+        pipe_output = out_pipe(
+            annotated_sents,
             max_length=128,   # UN-HARDCODE
-            return_tensors='pt',
             padding="max_length",
             truncation=True,
             is_split_into_words=True,
         )
 
-        for out_task, model in out_model_dict.items():
+        for out, sent in zip(pipe_output, annotated_sents):
+            print(f"{out['label']} : {sent}")
+        """
+            ann_encoding = tokenizer(
+                ctakes_tok(ann_sent),
+                max_length=128,   # UN-HARDCODE
+                return_tensors='pt',
+                padding="max_length",
+                truncation=True,
+                is_split_into_words=True,
+            )
+            
             model.eval() # wew lad
             out_task_processor = cnlp_processors[out_task]()
             out_task_labels = out_task_processor.get_labels()
@@ -179,6 +190,7 @@ def inference(pipeline_args):
             out_label_idx = torch.argmax(scores).item()
             label = out_task_labels[out_label_idx]
             print(f"{label} : {ann_sent}")
+        """
 
 
 def evaluation(pipeline_args):
@@ -199,8 +211,7 @@ def evaluation(pipeline_args):
     )
 
     taggers_dict, out_model_dict = model_dicts(
-        pipeline_args.models_dir,
-        tokenizer
+        pipeline_args.models_dir
     )
 
     sent_processor = None
@@ -228,7 +239,6 @@ def evaluation(pipeline_args):
         deannotated_sents,
         taggers_dict,
         out_model_dict,
-        tokenizer,
         pipeline_args.axis_task,
     )
     print(f"preds \n {type(predictions)} \n {predictions}")
