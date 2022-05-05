@@ -122,7 +122,8 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
     for sig_ann in sig_ann_ls:
         raw_partitions = get_partitions(axis_ann, sig_ann)
         anafora_tagged = get_anafora_tags(raw_partitions, sentence)
-        merged_annotations.append(" ".join(anafora_tagged))
+        if anafora_tagged is not None:
+            merged_annotations.append(" ".join(anafora_tagged))
     return merged_annotations
             
 def get_partitions(axis_ann, sig_ann):
@@ -142,18 +143,21 @@ def get_partitions(axis_ann, sig_ann):
 def get_anafora_tags(raw_partitions, sentence):
     span_begin = 0
     annotated_list = []
-    split_sent = ctakes_tok(sentence) 
+    split_sent = ctakes_tok(sentence)
+    axis_seen, sig_seen = False, False 
     for tag_idx, span_iter in groupby(raw_partitions):
         span_end = len(list(span_iter)) + span_begin
         span = split_sent[span_begin:span_end]
         ann_span = span
         if tag_idx == 1:
-            ann_span = ['<a1>'] + span + ['</a1>'] 
+            ann_span = ['<a1>'] + span + ['</a1>']
+            axis_seen = True
         elif tag_idx == 2:
             ann_span = ['<a2>'] + span + ['</a2>']
+            sig_seen = True
         annotated_list.extend(ann_span)
         span_begin = span_end
-    return annotated_list
+    return annotated_list if axis_seen and sig_seen else None
 
 
 def get_eval_predictions(

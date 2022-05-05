@@ -127,15 +127,6 @@ def inference(pipeline_args):
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
-    """
-    tokenizer = AutoTokenizer.from_pretrained(
-        pipeline_args.tokenizer,
-        # cache_dir=model_args.cache_dir,
-        add_prefix_space=True,
-        additional_special_tokens=SPECIAL_TOKENS,
-    )
-    """
-    
     taggers_dict, out_model_dict = model_dicts(
         pipeline_args.models_dir,
     )
@@ -156,8 +147,6 @@ def inference(pipeline_args):
         taggers_dict,
         pipeline_args.axis_task,
     )
-
-    softmax = torch.nn.Softmax(dim=1)
 
     for out_task, out_pipe in out_model_dict.items():
         pipe_output = out_pipe(
