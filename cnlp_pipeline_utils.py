@@ -30,11 +30,14 @@ def get_model_pairs(str_labels_dict, taggers_dict):
     model_pairs = {}
     model_names = [key for key, value in taggers_dict.items()]
     model_suffixes = [name.split('_')[-1] for name in model_names]
+    # Used to get the relevant models from the label name,
+    # e.g. med-dosage -> med, dosage -> dphe-med, dphe-dosage,
+    # -> taggers_dict[dphe-med], taggers_dict[dphe-dosage]
     def partial_match(s1, s2):
         part = min(len(s1), len(s2))
         return s1[:part] == s2[:part]
     for task_name, labels in str_labels_dict.items():
-        model_pairs[task_name] = []
+        model_pairs[task_name] = [] 
         for label in labels:
             axis_tag, sig_tag = label.split('-')
             axis_model = list(

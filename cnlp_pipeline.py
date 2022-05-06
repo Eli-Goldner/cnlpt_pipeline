@@ -116,6 +116,7 @@ def main():
 
 
 def inference(pipeline_args):
+    # Required for loading cnlpt models using Huggingface
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
@@ -123,12 +124,19 @@ def inference(pipeline_args):
         pipeline_args.models_dir,
     )
 
+    # Only need raw sentences for inference
     _, _, sentences = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="inf",
         task_names=out_model_dict.keys(),
     )
 
+    # Annotate the sentences with entities
+    # using the taggers. e.g.
+    # 'tamoxifen , 20 mg once daily' 
+    # (dphe_strength) -> '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily' 
+    # (dphe_freq)-> '<a1> tamoxifen </a1>, 20 mg <a2> once daily </a2>'
+    # etc.
     annotated_sents = assemble(
         sentences,
         taggers_dict,
@@ -136,6 +144,10 @@ def inference(pipeline_args):
     )
 
     for out_task, out_pipe in out_model_dict.items():
+        # Get the output for each relation classifier models,
+        # tokenizer_kwargs are passed directly
+        # text classification pipelines during __call__
+        # (Huggingface's idea not mine)
         pipe_output = out_pipe(
             annotated_sents,
             padding="max_length",
@@ -143,15 +155,13 @@ def inference(pipeline_args):
             is_split_into_words=True,
         )
 
+        # For now just print the system annotated sentence
+        # plus its predicted relation label
         for out, sent in zip(pipe_output, annotated_sents):
             print(f"{out['label']} : {sent}")
 
 
 def evaluation(pipeline_args):
-    # used to get the relevant models from the label name,
-    # e.g. med-dosage -> med, dosage -> dphe-med, dphe-dosage,
-    # -> taggers_dict[dphe-med], taggers_dict[dphe-dosage]
-
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
@@ -159,13 +169,22 @@ def evaluation(pipeline_args):
         pipeline_args.models_dir
     )
 
+    # Assume sentences are annotated and clean them anyway
+    # for eval we will need the index based labels organized by out task
+    # as well as the string labels organized by out task (for finding relevant model pairs)
     idx_labels_dict, str_labels_dict, annotated_sents = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
         task_names=out_model_dict.keys(),
     ) 
-    
+
+    # Get the model (by task_name) pairs for each instance e.g.
+    # med-dosage -> (dphe_med, dphe_dosage)
     model_pairs_dict = get_model_pairs(str_labels_dict, taggers_dict)
+
+    # Remove annotations from the sentence e.g.
+    #'<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
+    # -> 'tamoxifen , 20 mg once daily'
     deannotated_sents = list(map(lambda s : re.sub(r"</?a[1-2]>", "", s), annotated_sents))
     
     predictions_dict = get_eval_predictions(
