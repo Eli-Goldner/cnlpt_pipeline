@@ -47,10 +47,10 @@ class PipelineArguments:
     models_dir: str = field(
         metadata={
             "help": (
-                "Path where each entity model is stored"
-                "in a folder named after its corresponding cnlp_processor,"
-                "models with a 'tagging' output mode will be run first"
-                "followed by models with a 'classification'"
+                "Path where each entity model is stored "
+                "in a folder named after its corresponding cnlp_processor, "
+                "models with a 'tagging' output mode will be run first "
+                "followed by models with a 'classification' "
                 "ouput mode over the assembled data"
             )
         }
