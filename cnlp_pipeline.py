@@ -70,7 +70,7 @@ class PipelineArguments:
         metadata={
             "help": (
                 "Use mode for full pipeline, "
-                "inference, which outputs annotated sentences"
+                "inference, which outputs annotated sentences "
                 "and their relation, or eval, "
                 "which outputs metrics for a provided set of samples "
                 "(requires labels)"

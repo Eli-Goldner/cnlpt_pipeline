@@ -22,7 +22,7 @@ optional arguments:
                         sentence> per line in the case of evaluation (default:
                         None)
   --mode MODE           Use mode for full pipeline, inference, which outputs
-                        annotated sentencesand their relation, or eval, which
+                        annotated sentences and their relation, or eval, which
                         outputs metrics for a provided set of samples
                         (requires labels) (default: inf)
   --axis_task AXIS_TASK
@@ -32,5 +32,19 @@ optional arguments:
 
 ```
 
+The `cnlpt` models and their corresponding tokenizers used to generate the pipelines should be stored in the directory passed to the `models_dir` parameter,
+where the folder each model is stored in has the name of the `cnlp_processors` task the model was trained on.
+The `temp` folder used when training models with `cnlp_transformers` at the end of training will contain all the content needed for these task directories.
 
-## Structure
+The code takes in data to run through the pipelines via the `in_file` parameter.  And the way it
+will be processed will be determined by the `mode` parameter.
+For inference mode, the file should contain raw unannotated sentences, any labels will be ignored.
+For evaluation mode, the file should contain labels and sentences separated by tabs.
+In evaluation the sentence may or may not be annotated, since all annotations are stripped from the sentence
+before being passed to the pipeline.
+
+Currently the code assumed that all models are either `cnlpt` entity taggers or sentential relation classifiers.  The taggers are run on a sentence and the results from all the taggers are converted into inputs which are appropriate for each relation classifier.  These relation labels are in between two types of entities,
+and the vocabulary of relations is determined by the possible pairs of entities, and a central type of entity.
+We call this type of entity the axis or anchor entity and tell the code to construct relations around this entity by providing the `axis_task` which is the `cnlp_processors` task which tags a sentence for the central type ofentity.
+
+## Structure and Rationale
