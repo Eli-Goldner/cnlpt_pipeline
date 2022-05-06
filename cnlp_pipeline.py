@@ -186,7 +186,9 @@ def evaluation(pipeline_args):
     #'<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
     # -> 'tamoxifen , 20 mg once daily'
     deannotated_sents = list(map(lambda s : re.sub(r"</?a[1-2]>", "", s), annotated_sents))
-    
+
+    # Get dictionary of predictions
+    # indexed by task 
     predictions_dict = get_eval_predictions(
         model_pairs_dict,
         deannotated_sents,
@@ -195,6 +197,7 @@ def evaluation(pipeline_args):
         pipeline_args.axis_task,
     )
 
+    # Print the metrics by task
     for task_name, predictions in predictions_dict.items(): 
         report = cnlp_compute_metrics(task_name, np.array(predictions), np.array(idx_labels_dict[task_name]))
         print(report)
