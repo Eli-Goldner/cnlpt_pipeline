@@ -84,12 +84,8 @@ class TaggingPipeline(Pipeline):
 
     def __call__(self, inputs: Union[str, List[str]], **kwargs):
         """
-        Flesh out - see HF code for format
+        Flesh out(?) - see corresponding Huggingface code for format
         """
-        # If an arg parsers results are never called
-        # in the forest but someone comments it
-        # does it still have side effects?
-        # _inputs = self._args_parser(inputs, **kwargs)
         return super().__call__(inputs, **kwargs)
 
     def preprocess(self, sentence):
@@ -102,8 +98,9 @@ class TaggingPipeline(Pipeline):
             is_split_into_words=True,
         )
 
-        # This is what we use for cnlpt/cTAKES based tagging
-        # rather than an aggregation strategy
+        # We use the tokenizer word_ids for cnlpt/cTAKES based tagging
+        # rather than an aggregation strategy used by
+        # typical Huggingface pipelines
         model_inputs["word_ids"] = model_inputs.word_ids()
 
         return model_inputs
@@ -131,14 +128,20 @@ class TaggingPipeline(Pipeline):
         word_ids = model_outputs["word_ids"]
 
         if task_processor is None:
-            raise ValueError("You guessed it!")
+            raise ValueError("task_processor missing")
 
+        # We use the task processor labels for classification
+        # rather than the model config's id2label/label2id maps
+        # since these always seem to be binary for cnlpt models.
+        # This is the other central change from Huggingface pipelines
+        # code besides exclusive use of Dongfang's word_ids logic
         label_list = task_processor.get_labels()
 
         maxes = np.max(logits, axis=-1, keepdims=True)
         shifted_exp = np.exp(logits - maxes)
         scores = shifted_exp / shifted_exp.sum(axis=-1, keepdims=True)
 
+        # Return the tags for the sentence
         return self.get_annotation(input_ids, word_ids, scores[0], label_list)
 
     def get_annotation(
@@ -150,21 +153,23 @@ class TaggingPipeline(Pipeline):
     ) -> List[dict]:
         final_tags = []
         assert len(word_ids) == len(scores), (
-            "Eq problem 1 \n"
-            f"word_ids : {word_ids}"
-            f"scores : {scores}"
+            "Word id and score sentence mismatch \n"
+            f"word_ids : {word_ids} \n"
+            f"scores : {scores} \n"
         )
         assert len(word_ids) == len(input_ids), (
-            "Eq problem 2"
-            f"word_ids : {word_ids}"
-            f"input_ids : {input_ids}"
+            "Word id and input id sentence mismatch \n"
+            f"word_ids : {word_ids} \n"
+            f"input_ids : {input_ids} \n"
         )
 
         prev_word_id = None
 
         for idx, token_scores in enumerate(scores):
             word_id = word_ids[idx]
-            # reason for three conditions allows for the last tag to get seen
+            # Reason for three mutally exclusive conditions 
+            # (instead of multiple `if`s with the same condition)
+            # allows for the last tag to get seen
             if word_id is None:
                 prev_word_id = word_id
             elif word_id != prev_word_id:

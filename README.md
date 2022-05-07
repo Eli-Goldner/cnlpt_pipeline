@@ -46,5 +46,3 @@ before being passed to the pipeline.
 Currently the code assumed that all models are either `cnlpt` entity taggers or sentential relation classifiers.  The taggers are run on a sentence and the results from all the taggers are converted into inputs which are appropriate for each relation classifier.  These relation labels are in between two types of entities,
 and the vocabulary of relations is determined by the possible pairs of entities, and a central type of entity.
 We call this type of entity the axis or anchor entity and tell the code to construct relations around this entity by providing the `axis_task` which is the `cnlp_processors` task which tags a sentence for the central type ofentity.
-
-## Structure and Rationale

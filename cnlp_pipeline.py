@@ -1,16 +1,11 @@
 import os
 import re
-import torch
 import sys
-import types
-import json
 import numpy as np
-from typing import List, Optional, Union
 
 from dataclasses import dataclass, field
 
 from .cnlp_pipeline_utils import (
-    ctakes_tok,
     model_dicts,
     get_sentences_and_labels,
     assemble,
@@ -18,21 +13,11 @@ from .cnlp_pipeline_utils import (
     get_eval_predictions,
 )
 
-from .pipelines.tagging import TaggingPipeline
-
-from .cnlp_processors import (
-    cnlp_processors,
-    cnlp_output_modes,
-    tagging,
-    classification,
-    cnlp_compute_metrics,
-)
+from .cnlp_processors import cnlp_compute_metrics
 
 from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
 
-from transformers import AutoConfig, AutoTokenizer, AutoModel, HfArgumentParser
-
-from itertools import chain, groupby
+from transformers import AutoConfig, AutoModel, HfArgumentParser
 
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
@@ -48,7 +33,8 @@ class PipelineArguments:
         metadata={
             "help": (
                 "Path where each entity model is stored "
-                "in a folder named after its corresponding cnlp_processor, "
+                "in a folder named after its "
+                "corresponding cnlp_processor, "
                 "models with a 'tagging' output mode will be run first "
                 "followed by models with a 'classification' "
                 "ouput mode over the assembled data"
@@ -133,8 +119,8 @@ def inference(pipeline_args):
 
     # Annotate the sentences with entities
     # using the taggers. e.g.
-    # 'tamoxifen , 20 mg once daily' 
-    # (dphe_strength) -> '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily' 
+    # 'tamoxifen , 20 mg once daily'
+    # (dphe_strength) -> '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
     # (dphe_freq)-> '<a1> tamoxifen </a1>, 20 mg <a2> once daily </a2>'
     # etc.
     annotated_sents = assemble(
@@ -171,24 +157,34 @@ def evaluation(pipeline_args):
 
     # Assume sentences are annotated and clean them anyway
     # for eval we will need the index based labels organized by out task
-    # as well as the string labels organized by out task (for finding relevant model pairs)
-    idx_labels_dict, str_labels_dict, annotated_sents = get_sentences_and_labels(
+    # as well as the string labels organized by out task
+    # (for finding relevant model pairs)
+    (
+        idx_labels_dict,
+        str_labels_dict,
+        annotated_sents
+    ) = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
         task_names=out_model_dict.keys(),
-    ) 
+    )
 
     # Get the model (by task_name) pairs for each instance e.g.
     # med-dosage -> (dphe_med, dphe_dosage)
     model_pairs_dict = get_model_pairs(str_labels_dict, taggers_dict)
 
     # Remove annotations from the sentence e.g.
-    #'<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
+    # '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
     # -> 'tamoxifen , 20 mg once daily'
-    deannotated_sents = list(map(lambda s : re.sub(r"</?a[1-2]>", "", s), annotated_sents))
+    deannotated_sents = list(
+        map(
+            lambda s: re.sub(r"</?a[1-2]>", "", s),
+            annotated_sents
+        )
+    )
 
     # Get dictionary of predictions
-    # indexed by task 
+    # indexed by task
     predictions_dict = get_eval_predictions(
         model_pairs_dict,
         deannotated_sents,
@@ -198,8 +194,12 @@ def evaluation(pipeline_args):
     )
 
     # Print the metrics by task
-    for task_name, predictions in predictions_dict.items(): 
-        report = cnlp_compute_metrics(task_name, np.array(predictions), np.array(idx_labels_dict[task_name]))
+    for task_name, predictions in predictions_dict.items():
+        report = cnlp_compute_metrics(
+            task_name,
+            np.array(predictions),
+            np.array(idx_labels_dict[task_name])
+        )
         print(report)
 
 

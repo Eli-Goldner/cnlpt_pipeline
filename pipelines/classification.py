@@ -140,12 +140,9 @@ class ClassificationPipeline(Pipeline):
         return_tensors = self.framework
         return self.tokenizer(
             ctakes_tok(inputs),
-            max_length=self.tokenizer.model_max_length, # not sure how to pass this one upstream
+            # not sure how to pass this one upstream in a non-messy way
+            max_length=self.tokenizer.model_max_length, 
             return_tensors=return_tensors,
-            # pass these upstream with __call__(**kwargs)
-            # padding="max_length",
-            # truncation=True,
-            # is_split_into_words=True
             **tokenizer_kwargs
         )
 
@@ -159,20 +156,10 @@ class ClassificationPipeline(Pipeline):
             task_processor: DataProcessor,
             return_all_scores=False,
     ):
-        # Default value before `set_parameters`
+        # Using task processor labels here
+        # instead of id2label and label2id from the config
+        # for the same reasons described in tagging.py
         label_list = task_processor.get_labels()
-
-        """
-        if function_to_apply is None:
-            if self.model.config.problem_type == "multi_label_classification" or self.model.config.num_labels == 1:
-                function_to_apply = ClassificationFunction.SIGMOID
-            elif self.model.config.problem_type == "single_label_classification" or self.model.config.num_labels > 1:
-                function_to_apply = ClassificationFunction.SOFTMAX
-            elif hasattr(self.model.config, "function_to_apply") and function_to_apply is None:
-                function_to_apply = self.model.config.function_to_apply
-            else:
-                function_to_apply = ClassificationFunction.NONE
-        """
 
         if len(label_list) == 1:
             function_to_apply = ClassificationFunction.SIGMOID
