@@ -238,6 +238,10 @@ def get_anafora_tags(raw_partitions, sentence):
     sig_seen = False
     for tag_idx, span_iter in groupby(raw_partitions):
         span_end = len(list(span_iter)) + span_begin
+        # Ran into this issue when given a sentences
+        # with nothing but mentions
+        if span_end > 0:
+            span_end = span_end - 1
         # Get the span of the split sentence
         # which is aligned with the current
         # span of the same integer
