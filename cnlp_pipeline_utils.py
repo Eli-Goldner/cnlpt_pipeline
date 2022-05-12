@@ -15,7 +15,9 @@ from .CnlpModelForClassification import CnlpModelForClassification
 
 from transformers import AutoConfig, AutoTokenizer
 
-from itertools import chain, groupby
+from heapq import merge
+
+from itertools import chain, groupby, tee
 
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
@@ -197,6 +199,20 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
             merged_annotations.append(" ".join(anafora_tagged))
     return merged_annotations
 
+
+# Shamelessly grabbed from https://stackoverflow.com/a/57293089
+def get_intersect(ls1, ls2):
+     m1, m2 = tee(merge(ls1, ls2, key=lambda k: k[0]))
+     next(m2, None)
+     out = []
+     for v, g in groupby(zip(m1, m2), lambda k: k[0][1] < k[1][0]):
+             if not v:
+                     l = [*g][0]
+                     inf = max(i[0] for i in l)
+                     sup = min(i[1] for i in l)
+                     if inf != sup:
+                         out.append((inf, sup))
+     return out
 
 # Turn two annotations into a list of integers,
 # used for fast grouping of indices
