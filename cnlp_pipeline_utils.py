@@ -1,4 +1,6 @@
 import os
+import re
+import warnings
 
 from .cnlp_processors import (
     cnlp_processors,
@@ -17,7 +19,7 @@ from transformers import AutoConfig, AutoTokenizer
 
 from heapq import merge
 
-from itertools import chain, groupby, tee
+from itertools import chain, izip, groupby, tee
 
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
@@ -159,14 +161,19 @@ def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
         ann_sents = []
         # Make sure there's at least one axial mention
         # before running any other taggers
-        if any(filter(lambda x: x.startswith('B'), axis_ann)):
+        if any(filter(lambda x: x[0] == 'B', axis_ann)):
             sig_ann_ls = []
             for task, pipeline in taggers_dict.items():
                 # Don't rerun the axial pipeline
                 if task != axis_task:
                     sig_out = pipeline(sentence)
                     sig_ann_ls.append(sig_out)
-            ann_sents = merge_annotations(axis_ann, sig_ann_ls, sentence)
+            ann_sents = merge_annotations(
+                axis_ann,
+                sig_ann_ls,
+                sentence,
+                mode='inf'
+            )
     elif mode == 'eval':
         # For eval, we need to run both taggers regardless of
         # whether they miss
@@ -176,10 +183,49 @@ def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
             if task != axis_task:
                 sig_out = pipeline(sentence)
                 sig_ann_ls.append(sig_out)
-        ann_sents = merge_annotations(axis_ann, sig_ann_ls, sentence)
+        ann_sents = merge_annotations(
+            axis_ann,
+            sig_ann_ls,
+            sentence,
+            mode='eval',
+        )
     else:
         ValueError("Invalid processing mode: {model}")
     return ann_sents
+
+
+# Convert from B I O list format
+# to 120 string format for easy
+# pattern matching
+def get_partitions(annotation):
+    def tag2idx(tag):
+        if tag != 'O':
+            if tag[0] == 'B':
+                return '1'
+            elif tag[0] == 'I':
+                return '2'
+        # 2 identifies the second
+        else:
+            return '0'
+    ''.join(map(tag2idx, annotation))
+
+
+def process_ann(annotation):
+    span_begin, span_end = 0, 0
+    indices = []
+    partitions = get_partitions(annotation)
+    # Group 1's individually as well as 1's followed by
+    # any nummber of 2's, e.g.
+    # 00000011111112222121212
+    # -> 000000 1 1 1 1 1 1 12222 12 12 12
+    for span in filter(None, re.split(r'(12*)', partitions)):
+        span_end = len(span) + span_begin
+        if span[0] == '1':
+            # Get indices in list/string of each span
+            # which describes a mention
+            indices.append((span_begin, span_end))
+        span_begin = span_end
+    return indices
 
 
 # Given a raw sentence, an axial entity tagging,
@@ -188,93 +234,73 @@ def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
 # around the entities
 # - this is another wrapper function where
 # we handle looping and some optimizations
-def merge_annotations(axis_ann, sig_ann_ls, sentence):
+def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
     merged_annotations = []
-    for sig_ann in sig_ann_ls:
-        raw_partitions = get_partitions(axis_ann, sig_ann)
-        anafora_tagged = get_anafora_tags(raw_partitions, sentence)
-        # Filter out non-axial tags that didn't find any annotations
-        # as well
-        if anafora_tagged is not None:
-            merged_annotations.append(" ".join(anafora_tagged))
+    axis_indices = process_ann(axis_ann)
+    sig_indices_ls = [process_ann(sig_ann) for sig_ann in sig_ann_ls]
+    ref_sent = ctakes_tok(sentence)
+    if mode == 'eval':
+        for sig_indices in sig_indices_ls:
+            ann_sent = ref_sent.copy()
+            intersects = get_intersect(sig_indices, axis_indices)
+            if intersects:
+                warnings.warn(
+                    (
+                        "Warning axis annotation and sig annotation \n"
+                        f"{ref_sent}\n"
+                        f"{axis_indices}\n"
+                        f"{sig_indices}\n"
+                        f"Have intersections at indices:\n"
+                        f"{intersects}"
+                    )
+                )
+            else:
+                for (a1, a2), (s1, s2) in izip(axis_indices, sig_indices):
+                    ann_sent[s1] = '<a2> ' + ann_sent[s1]
+                    ann_sent[s2] = ann_sent[s2] + ' </a2>'
+                    ann_sent[a1] = '<a1> ' + ann_sent[a1]
+                    ann_sent[a2] = ann_sent[a2] + ' </a1>'
+                merged_annotations.append(''.join([ann_sent]))
+    elif mode == 'inf':
+        for a1, a2 in axis_indices:
+            for sig_indices in sig_indices_ls:
+                for s1, s2 in sig_indices:
+                    intersects = get_intersect([(a1, a2)], [(s1, s2)])
+                    if intersects:
+                        warnings.warn(
+                            (
+                                "Warning axis annotation and sig annotation \n"
+                                f"{ref_sent}\n"
+                                f"{a1, a2}\n"
+                                f"{s1, s2}\n"
+                                f"Have intersections at indices:\n"
+                                f"{intersects}"
+                            )
+                        )
+                    ann_sent = ref_sent.copy()
+                    ann_sent[s1] = '<a2> ' + ann_sent[s1]
+                    ann_sent[s2] = ann_sent[s2] + ' </a2>'
+                    ann_sent[a1] = '<a1> ' + ann_sent[a1]
+                    ann_sent[a2] = ann_sent[a2] + ' </a1>'
+                    merged_annotations.append(''.join([ann_sent]))
+    else:
+        ValueError(f"Invalid processsing mode : {mode}")
     return merged_annotations
 
 
 # Shamelessly grabbed from https://stackoverflow.com/a/57293089
 def get_intersect(ls1, ls2):
-     m1, m2 = tee(merge(ls1, ls2, key=lambda k: k[0]))
-     next(m2, None)
-     out = []
-     for v, g in groupby(zip(m1, m2), lambda k: k[0][1] < k[1][0]):
-             if not v:
-                     l = [*g][0]
-                     inf = max(i[0] for i in l)
-                     sup = min(i[1] for i in l)
-                     if inf != sup:
-                         out.append((inf, sup))
-     return out
-
-# Turn two annotations into a list of integers,
-# used for fast grouping of indices
-# in get_anafora_tags
-def get_partitions(axis_ann, sig_ann):
-    assert len(axis_ann) == len(sig_ann), (
-        "Taggnings are not aligned: \n"
-        f"Axis : {axis_ann}"
-        f"Signature : {sig_ann}"
-    )
-
-    def tag2idx(tag_pair):
-        t1, t2 = tag_pair
-        # Ensure no overlapping annotations
-        if t1 != 'O' and t2 != 'O':
-            ValueError("Overlapping tags!")
-        # 1 identifies the first tag
-        elif t1 != 'O':
-            return 1
-        # 2 identifies the second
-        elif t2 != 'O':
-            return 2
-        # 0 identifies no tag
-        elif t1 == 'O' and t2 == 'O':
-            return 0
-    return map(tag2idx, zip(axis_ann, sig_ann))
-
-
-# Given a list of integers over {0,1,2}
-# and an unannotated sentence,
-# return the sentence with <a1> X </a1>
-# where X is the span of the split sentence
-# corresponding to the span of 1's in the list of integers
-# similarly for 2 and <a2>
-def get_anafora_tags(raw_partitions, sentence):
-    span_begin = 0
-    annotated_list = []
-    split_sent = ctakes_tok(sentence)
-    sig_seen = False
-    for tag_idx, span_iter in groupby(raw_partitions):
-        span_end = len(list(span_iter)) + span_begin
-        # Ran into this issue when given a sentences
-        # with nothing but mentions
-        if span_end > 0:
-            span_end = span_end - 1
-        # Get the span of the split sentence
-        # which is aligned with the current
-        # span of the same integer
-        span = split_sent[span_begin:span_end]
-        ann_span = span
-        # Tags are done by type, not order of appearence
-        if tag_idx == 1:
-            ann_span = ['<a1>'] + span + ['</a1>']
-        elif tag_idx == 2:
-            ann_span = ['<a2>'] + span + ['</a2>']
-            # We know a priori from earlier filtering
-            # <a1> is taken care of, here we make
-            # sure <a2> is hit
-            sig_seen = True
-        annotated_list.extend(ann_span)
-        span_begin = span_end
-    return annotated_list if sig_seen else None
+    m1, m2 = tee(merge(ls1, ls2, key=lambda k: k[0]))
+    next(m2, None)
+    out = []
+    for v, g in groupby(zip(m1, m2), lambda k: k[0][1] < k[1][0]):
+        if not v:
+            ls = [*g][0]
+            inf = max(i[0] for i in ls)
+            sup = min(i[1] for i in ls)
+            if inf != sup:
+                out.append((inf, sup))
+    return out
 
 
 # Get dictionary of final pipeline predictions
