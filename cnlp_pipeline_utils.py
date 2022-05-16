@@ -347,7 +347,7 @@ def get_eval_predictions(
                 truncation=True,
                 is_split_into_words=True,
             )
-            out_labels.append(out_label_map[pipe_output['label']])
+            out_labels.append(out_label_map[pipe_output[0]['label']])
         predictions_dict[out_task] = out_labels
 
         return predictions_dict

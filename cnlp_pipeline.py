@@ -144,7 +144,7 @@ def inference(pipeline_args):
 
             # For now just print the system annotated sentence
             # plus its predicted relation label
-            print(f"{pipe_output['label']} : {ann_sent}")
+            print(f"{pipe_output[0]['label']} : {ann_sent}")
 
 
 def evaluation(pipeline_args):
