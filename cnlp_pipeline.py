@@ -108,6 +108,7 @@ def inference(pipeline_args):
 
     taggers_dict, out_model_dict = model_dicts(
         pipeline_args.models_dir,
+        mode='inf',
     )
 
     # Only need raw sentences for inference
@@ -168,7 +169,8 @@ def evaluation(pipeline_args):
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
     taggers_dict, out_model_dict = model_dicts(
-        pipeline_args.models_dir
+        pipeline_args.models_dir,
+        mode='eval',
     )
 
     # Assume sentences are annotated and clean them anyway

@@ -68,7 +68,7 @@ def get_model_pairs(str_labels_dict, taggers_dict):
 # Get dictionary of entity tagging models/pipelines
 # and relation extraction models/pipelines
 # both indexed by task names
-def model_dicts(models_dir):
+def model_dicts(models_dir, mode='inf'):
     taggers_dict = {}
     out_model_dict = {}
 
@@ -111,11 +111,23 @@ def model_dicts(models_dir):
                 )
             # Add classification pipelines to the classification dictionary
             elif cnlp_output_modes[task_name] == classification:
-                out_model_dict[task_name] = ClassificationPipeline(
-                    model=model,
-                    tokenizer=tokenizer,
-                    task_processor=task_processor
-                )
+                classifier = None
+                if mode == 'inf':
+                    classifier = ClassificationPipeline(
+                        model=model,
+                        tokenizer=tokenizer,
+                        return_all_scores=True,
+                        task_processor=task_processor
+                    )
+                elif mode == 'eval':
+                    classifier = ClassificationPipeline(
+                        model=model,
+                        tokenizer=tokenizer,
+                        task_processor=task_processor
+                    )
+                else:
+                    ValueError("Invalid processing mode")
+                out_model_dict[task_name] = classifier
             # Tasks other than tagging and sentence/relation classification
             # not supported for now since I wasn't sure how to fit them in
             else:
