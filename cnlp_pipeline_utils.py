@@ -19,7 +19,7 @@ from transformers import AutoConfig, AutoTokenizer
 
 from heapq import merge
 
-from itertools import chain, izip, groupby, tee
+from itertools import chain, groupby, tee
 
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
@@ -207,7 +207,7 @@ def get_partitions(annotation):
         # 2 identifies the second
         else:
             return '0'
-    ''.join(map(tag2idx, annotation))
+    return ''.join(map(tag2idx, annotation))
 
 
 def process_ann(annotation):
@@ -218,13 +218,14 @@ def process_ann(annotation):
     # any nummber of 2's, e.g.
     # 00000011111112222121212
     # -> 000000 1 1 1 1 1 1 12222 12 12 12
+    
     for span in filter(None, re.split(r'(12*)', partitions)):
-        span_end = len(span) + span_begin
+        span_end = len(span) + span_begin - 1
         if span[0] == '1':
             # Get indices in list/string of each span
             # which describes a mention
             indices.append((span_begin, span_end))
-        span_begin = span_end
+        span_begin = span_end + 1
     return indices
 
 
@@ -255,12 +256,12 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
                     )
                 )
             else:
-                for (a1, a2), (s1, s2) in izip(axis_indices, sig_indices):
+                for (a1, a2), (s1, s2) in zip(axis_indices, sig_indices):
                     ann_sent[s1] = '<a2> ' + ann_sent[s1]
                     ann_sent[s2] = ann_sent[s2] + ' </a2>'
                     ann_sent[a1] = '<a1> ' + ann_sent[a1]
                     ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                merged_annotations.append(''.join([ann_sent]))
+                merged_annotations.append(''.join(ann_sent))
     elif mode == 'inf':
         for a1, a2 in axis_indices:
             for sig_indices in sig_indices_ls:
@@ -282,7 +283,7 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
                     ann_sent[s2] = ann_sent[s2] + ' </a2>'
                     ann_sent[a1] = '<a1> ' + ann_sent[a1]
                     ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                    merged_annotations.append(''.join([ann_sent]))
+                    merged_annotations.append(''.join(ann_sent))
     else:
         ValueError(f"Invalid processsing mode : {mode}")
     return merged_annotations
