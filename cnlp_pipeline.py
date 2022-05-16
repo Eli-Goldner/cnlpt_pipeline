@@ -134,17 +134,17 @@ def inference(pipeline_args):
         # tokenizer_kwargs are passed directly
         # text classification pipelines during __call__
         # (Huggingface's idea not mine)
-        pipe_output = out_pipe(
-            annotated_sents,
-            padding="max_length",
-            truncation=True,
-            is_split_into_words=True,
-        )
+        for ann_sent in annotated_sents:
+            pipe_output = out_pipe(
+                ann_sent,
+                padding="max_length",
+                truncation=True,
+                is_split_into_words=True,
+            )
 
-        # For now just print the system annotated sentence
-        # plus its predicted relation label
-        for out, sent in zip(pipe_output, annotated_sents):
-            print(f"{out['label']} : {sent}")
+            # For now just print the system annotated sentence
+            # plus its predicted relation label
+            print(f"{pipe_output['label']} : {ann_sent}")
 
 
 def evaluation(pipeline_args):

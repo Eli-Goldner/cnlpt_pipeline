@@ -261,7 +261,7 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
                     ann_sent[s2] = ann_sent[s2] + ' </a2>'
                     ann_sent[a1] = '<a1> ' + ann_sent[a1]
                     ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                merged_annotations.append(''.join(ann_sent))
+                merged_annotations.append(' '.join(ann_sent))
     elif mode == 'inf':
         for a1, a2 in axis_indices:
             for sig_indices in sig_indices_ls:
@@ -283,13 +283,13 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
                     ann_sent[s2] = ann_sent[s2] + ' </a2>'
                     ann_sent[a1] = '<a1> ' + ann_sent[a1]
                     ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                    merged_annotations.append(''.join(ann_sent))
+                    merged_annotations.append(' '.join(ann_sent))
     else:
         ValueError(f"Invalid processsing mode : {mode}")
     return merged_annotations
 
 
-# Shamelessly grabbed from https://stackoverflow.com/a/57293089
+# Shamelessly grabbed (and adapted) from https://stackoverflow.com/a/57293089
 def get_intersect(ls1, ls2):
     m1, m2 = tee(merge(ls1, ls2, key=lambda k: k[0]))
     next(m2, None)
@@ -299,8 +299,6 @@ def get_intersect(ls1, ls2):
             ls = [*g][0]
             inf = max(i[0] for i in ls)
             sup = min(i[1] for i in ls)
-            if inf != sup:
-                out.append((inf, sup))
     return out
 
 
@@ -339,17 +337,17 @@ def get_eval_predictions(
         out_task_labels = out_task_processor.get_labels()
 
         out_label_map = {label: i for i, label in enumerate(out_task_labels)}
-
-        pipe_output = out_pipe(
-            reannotated_sents[out_task],
-            # Again, classification pipelines
-            # take tokenizer args during __call__
-            padding="max_length",
-            truncation=True,
-            is_split_into_words=True,
-        )
-
-        out_labels = [out_label_map[record['label']] for record in pipe_output]
+        out_labels = []
+        for reann_sent in reannotated_sents[out_task]:
+            pipe_output = out_pipe(
+                reann_sent,
+                # Again, classification pipelines
+                # take tokenizer args during __call__
+                padding="max_length",
+                truncation=True,
+                is_split_into_words=True,
+            )
+            out_labels.append(out_label_map[pipe_output['label']])
         predictions_dict[out_task] = out_labels
 
         return predictions_dict
