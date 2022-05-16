@@ -123,7 +123,7 @@ def inference(pipeline_args):
     # (dphe_strength) -> '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
     # (dphe_freq)-> '<a1> tamoxifen </a1>, 20 mg <a2> once daily </a2>'
     # etc.
-    annotated_sents = assemble(
+    ann_sent_groups = assemble(
         sentences,
         taggers_dict,
         pipeline_args.axis_task,
@@ -134,18 +134,34 @@ def inference(pipeline_args):
         # tokenizer_kwargs are passed directly
         # text classification pipelines during __call__
         # (Huggingface's idea not mine)
-        for ann_sent in annotated_sents:
-            pipe_output = out_pipe(
-                ann_sent,
-                padding="max_length",
-                truncation=True,
-                is_split_into_words=True,
-            )
-
-            # For now just print the system annotated sentence
-            # plus its predicted relation label
-            print(f"{pipe_output[0]['label']} : {ann_sent}")
-
+        for ann_sent_group in ann_sent_groups:
+            axis_mention_dict = {}
+            for sent_dict in ann_sent_group:
+                main_offsets = sent_dict['main_offsets']
+                ann_sent = sent_dict['sentence']
+                pipe_output = out_pipe(
+                    ann_sent,
+                    padding="max_length",
+                    truncation=True,
+                    is_split_into_words=True,
+                )
+                strongest_label = max(pipe_output[0], lambda d: d['score'])
+                if (
+                        main_offsets not in axis_mention_dict.keys() or 
+                        (
+                            strongest_label['label'] == axis_mention_dict[main_offsets]['score'] and
+                            strongest_label['score'] > axis_mention_dict[main_offsets]['score']
+                        )
+                ):
+                    axis_label_dict = {
+                        'sentence' : ann_sent,
+                        'label' : strongest_label['label']
+                        'score' : strongest_label['score']
+                    }
+                    axis_mention_dict[main_offsets] = axis_label_dict
+            for labeled_sent in axis_mention_dict.values():    
+                print(f"{labeled_sent['label']}, {labeled_sent['score']} : {labeled_sent['sentence']}")
+            
 
 def evaluation(pipeline_args):
     AutoConfig.register("cnlpt", CnlpConfig)

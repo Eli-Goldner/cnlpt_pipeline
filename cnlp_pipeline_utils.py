@@ -139,12 +139,9 @@ def model_dicts(models_dir):
 def assemble(sentences, taggers_dict, axis_task):
     # Return one list of all the system prediction annotations
     # for each sentences
-    return list(
-        chain(
-            *[_assemble(sent, taggers_dict, axis_task, mode='inf') for sent
-              in sentences]
-        )
-    )
+    def process(sent):
+        return _assemble(sent, taggers_dict, axis_task, mode='inf')
+    return map(process, sentences)
 
 
 # Given a dictionary of taggers, a single sentence, and an axial task,
@@ -283,7 +280,8 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
                     ann_sent[s2] = ann_sent[s2] + ' </a2>'
                     ann_sent[a1] = '<a1> ' + ann_sent[a1]
                     ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                    merged_annotations.append(' '.join(ann_sent))
+                    sent_dict = {'sentence' : ' '.join(ann_sent), 'main_offsets' : (a1, a2)}
+                    merged_annotations.append(sent_dict)
     else:
         ValueError(f"Invalid processsing mode : {mode}")
     return merged_annotations
