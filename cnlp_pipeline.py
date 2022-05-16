@@ -146,22 +146,26 @@ def inference(pipeline_args):
                     truncation=True,
                     is_split_into_words=True,
                 )
-                strongest_label = max(pipe_output[0], lambda d: d['score'])
+                
+                strongest_label = max(pipe_output[0], key=lambda d: d['score'])
                 if (
-                        main_offsets not in axis_mention_dict.keys() or 
+                        main_offsets not in axis_mention_dict.keys() or
                         (
-                            strongest_label['label'] == axis_mention_dict[main_offsets]['score'] and
-                            strongest_label['score'] > axis_mention_dict[main_offsets]['score']
+                            strongest_label['label'] not in axis_mention_dict[main_offsets].keys()
+                        ) or
+                        (                           
+                            strongest_label['score'] > axis_mention_dict[main_offsets][strongest_label['label']]['score']
                         )
                 ):
+                    axis_mention_dict[main_offsets] = {}
                     axis_label_dict = {
                         'sentence' : ann_sent,
-                        'label' : strongest_label['label']
-                        'score' : strongest_label['score']
+                        'score' : strongest_label['score'],
                     }
-                    axis_mention_dict[main_offsets] = axis_label_dict
-            for labeled_sent in axis_mention_dict.values():    
-                print(f"{labeled_sent['label']}, {labeled_sent['score']} : {labeled_sent['sentence']}")
+                    axis_mention_dict[main_offsets][strongest_label['label']] = axis_label_dict
+            for labeled_dict in axis_mention_dict.values():
+                for label, sent in labeled_dict.items():
+                    print(f"{label}, {sent['score']} : {sent['sentence']}")
             
 
 def evaluation(pipeline_args):
