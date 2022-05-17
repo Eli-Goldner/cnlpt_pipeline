@@ -19,7 +19,7 @@ from transformers import AutoConfig, AutoTokenizer
 
 from heapq import merge
 
-from itertools import chain, groupby, tee
+from itertools import chain, groupby, tee, zip_longest
 
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
@@ -134,7 +134,7 @@ def model_dicts(models_dir, mode='inf'):
                 ValueError(
                     (
                         "output mode "
-                        f"{cnlp_output_modes[task_name]} "
+                        f"{cnlp_output_modes[task_name]}"
                         "not currently supported"
                     )
                 )
@@ -227,7 +227,6 @@ def process_ann(annotation):
     # any nummber of 2's, e.g.
     # 00000011111112222121212
     # -> 000000 1 1 1 1 1 1 12222 12 12 12
-    
     for span in filter(None, re.split(r'(12*)', partitions)):
         span_end = len(span) + span_begin - 1
         if span[0] == '1':
@@ -265,35 +264,49 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
                     )
                 )
             else:
-                for (a1, a2), (s1, s2) in zip(axis_indices, sig_indices):
-                    ann_sent[s1] = '<a2> ' + ann_sent[s1]
-                    ann_sent[s2] = ann_sent[s2] + ' </a2>'
-                    ann_sent[a1] = '<a1> ' + ann_sent[a1]
-                    ann_sent[a2] = ann_sent[a2] + ' </a1>'
+                for axis, sig in zip_longest(axis_indices, sig_indices):
+                    if sig is not None:
+                        s1, s2 = sig
+                        ann_sent[s1] = '<a2> ' + ann_sent[s1]
+                        ann_sent[s2] = ann_sent[s2] + ' </a2>'
+                    if axis is not None:
+                        a1, a2 = axis
+                        ann_sent[a1] = '<a1> ' + ann_sent[a1]
+                        ann_sent[a2] = ann_sent[a2] + ' </a1>'
                 merged_annotations.append(' '.join(ann_sent))
     elif mode == 'inf':
         for a1, a2 in axis_indices:
-            for sig_indices in sig_indices_ls:
-                for s1, s2 in sig_indices:
-                    intersects = get_intersect([(a1, a2)], [(s1, s2)])
-                    if intersects:
-                        warnings.warn(
-                            (
-                                "Warning axis annotation and sig annotation \n"
-                                f"{ref_sent}\n"
-                                f"{a1, a2}\n"
-                                f"{s1, s2}\n"
-                                f"Have intersections at indices:\n"
-                                f"{intersects}"
+            # list of lists, only want to
+            # iterate if at least one is non-empty
+            if any(sig_indices_ls):
+                for sig_indices in sig_indices_ls:
+                    for s1, s2 in sig_indices:
+                        intersects = get_intersect([(a1, a2)], [(s1, s2)])
+                        if intersects:
+                            warnings.warn(
+                                (
+                                    "Warning axis annotation and sig annotation \n"
+                                    f"{ref_sent}\n"
+                                    f"{a1, a2}\n"
+                                    f"{s1, s2}\n"
+                                    f"Have intersections at indices:\n"
+                                    f"{intersects}"
+                                )
                             )
-                        )
-                    ann_sent = ref_sent.copy()
-                    ann_sent[s1] = '<a2> ' + ann_sent[s1]
-                    ann_sent[s2] = ann_sent[s2] + ' </a2>'
-                    ann_sent[a1] = '<a1> ' + ann_sent[a1]
-                    ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                    sent_dict = {'sentence' : ' '.join(ann_sent), 'main_offsets' : (a1, a2)}
-                    merged_annotations.append(sent_dict)
+                        ann_sent = ref_sent.copy()
+                        ann_sent[a1] = '<a1> ' + ann_sent[a1]
+                        ann_sent[a2] = ann_sent[a2] + ' </a1>'
+                        ann_sent[s1] = '<a2> ' + ann_sent[s1]
+                        ann_sent[s2] = ann_sent[s2] + ' </a2>'
+                        
+                        sent_dict = {'sentence' : ' '.join(ann_sent), 'main_offsets' : (a1, a2)}
+                        merged_annotations.append(sent_dict)
+            else:
+                ann_sent = ref_sent.copy()
+                ann_sent[a1] = '<a1> ' + ann_sent[a1]
+                ann_sent[a2] = ann_sent[a2] + ' </a1>'
+                sent_dict = {'sentence' : ' '.join(ann_sent), 'main_offsets' : (a1, a2)}
+                merged_annotations.append(sent_dict)
     else:
         ValueError(f"Invalid processsing mode : {mode}")
     return merged_annotations

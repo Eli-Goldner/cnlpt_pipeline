@@ -181,7 +181,9 @@ class ClassificationPipeline(Pipeline):
             raise ValueError(f"Unrecognized `function_to_apply` argument: {function_to_apply}")
 
         if return_all_scores:
-            # It's not always clear that HF code makes life easier...
+            # By default scores are in a nested list that
+            # throws off item() but not max() and argmax()
+            # thus this guard
             if len(scores.shape) > 1:
                 scores = scores[0]
             return [{"label": label_list[i], "score": score.item()} for i, score in enumerate(scores)]

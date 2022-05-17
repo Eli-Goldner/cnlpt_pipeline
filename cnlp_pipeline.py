@@ -148,16 +148,30 @@ def inference(pipeline_args):
                 )
                 
                 strongest_label = max(pipe_output[0], key=lambda d: d['score'])
-                if (
-                        main_offsets not in axis_mention_dict.keys() or
-                        (
-                            strongest_label['label'] not in axis_mention_dict[main_offsets].keys()
-                        ) or
-                        (                           
-                            strongest_label['score'] > axis_mention_dict[main_offsets][strongest_label['label']]['score']
-                        )
-                ):
+
+                # print(f"{main_offsets} : {ann_sent}")
+                # print(f"{pipe_output[0]}")
+                # print(f"{strongest_label}")
+                
+                def label_update(label_dict, mention_dict, offsets):
+                    new_label = label_dict['label']
+                    new_score = label_dict['score']
+                    no_label = new_label not in mention_dict[main_offsets].keys()
+                    if no_label:
+                        return no_label
+                    else:
+                        # higher score
+                        return new_score > mention_dict[offsets][new_label]['score']
+                        
+
+                if main_offsets not in axis_mention_dict.keys():
                     axis_mention_dict[main_offsets] = {}
+                    axis_label_dict = {
+                        'sentence' : ann_sent,
+                        'score' : strongest_label['score'],
+                    }
+                    axis_mention_dict[main_offsets][strongest_label['label']] = axis_label_dict
+                elif label_update(strongest_label, axis_mention_dict, main_offsets):
                     axis_label_dict = {
                         'sentence' : ann_sent,
                         'score' : strongest_label['score'],
