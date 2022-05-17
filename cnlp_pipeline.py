@@ -212,12 +212,10 @@ def evaluation(pipeline_args):
     # Remove annotations from the sentence e.g.
     # '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
     # -> 'tamoxifen , 20 mg once daily'
-    deannotated_sents = list(
-        map(
-            lambda s: re.sub(r"</?a[1-2]>", "", s),
-            annotated_sents
-        )
-    )
+    def deannotate(s):
+        return re.sub(r"</?a[1-2]>", "", s)
+    
+    deannotated_sents = map(deannotate, annotated_sents)
 
     # Get dictionary of predictions
     # indexed by task
