@@ -9,7 +9,7 @@ from .cnlp_pipeline_utils import (
     model_dicts,
     get_sentences_and_labels,
     assemble,
-    get_model_pairs,
+    # get_model_pairs,
     get_eval_predictions,
 )
 
@@ -197,7 +197,7 @@ def evaluation(pipeline_args):
     # (for finding relevant model pairs)
     (
         idx_labels_dict,
-        str_labels_dict,
+        # str_labels_dict,
         annotated_sents
     ) = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
@@ -212,29 +212,21 @@ def evaluation(pipeline_args):
     # Remove annotations from the sentence e.g.
     # '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
     # -> 'tamoxifen , 20 mg once daily'
-    def deannotate(s):
-        return re.sub(r"</?a[1-2]>", "", s)
+    # def deannotate(s):
+    #    return re.sub(r"</?a[1-2]>", "", s)
     
-    deannotated_sents = map(deannotate, annotated_sents)
+    # deannotated_sents = map(deannotate, annotated_sents)
 
     # Get dictionary of predictions
     # indexed by task
     predictions_dict = get_eval_predictions(
-        model_pairs_dict,
-        deannotated_sents,
+        # model_pairs_dict,
+        # deannotated_sents,
+        annotated_sents,
         taggers_dict,
         out_model_dict,
         pipeline_args.axis_task,
     )
-
-    # Print the metrics by task
-    for task_name, predictions in predictions_dict.items():
-        report = cnlp_compute_metrics(
-            task_name,
-            np.array(predictions),
-            np.array(idx_labels_dict[task_name])
-        )
-        print(report)
 
 
 if __name__ == "__main__":

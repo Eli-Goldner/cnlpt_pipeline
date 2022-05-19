@@ -6,7 +6,8 @@ from .cnlp_processors import (
     cnlp_processors,
     cnlp_output_modes,
     tagging,
-    classification
+    classification,
+    classifier_to_relex 
 )
 
 from .pipelines.tagging import TaggingPipeline
@@ -124,30 +125,14 @@ def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
     axis_ann = axis_pipe(sentence)
     # We split by mode cases since there are optmizations
     # helpful for inference that could cause problems for
-    # evaluation
-    if mode == 'inf':
-        ann_sents = []
-        # Make sure there's at least one axial mention
-        # before running any other taggers
-        if any(filter(lambda x: x[0] == 'B', axis_ann)):
-            sig_ann_ls = []
-            for task, pipeline in taggers_dict.items():
-                # Don't rerun the axial pipeline
-                if task != axis_task:
-                    sig_out = pipeline(sentence)
-                    sig_ann_ls.append(sig_out)
-            ann_sents = merge_annotations(
-                axis_ann,
-                sig_ann_ls,
-                sentence,
-                mode='inf'
-            )
-    elif mode == 'eval':
-        # For eval, we need to run both taggers regardless of
-        # whether they miss
-        ann_sents = []
+    # evaluation 
+    ann_sents = []
+    # Make sure there's at least one axial mention
+    # before running any other taggers
+    if any(filter(lambda x: x[0] == 'B', axis_ann)):
         sig_ann_ls = []
         for task, pipeline in taggers_dict.items():
+            # Don't rerun the axial pipeline
             if task != axis_task:
                 sig_out = pipeline(sentence)
                 sig_ann_ls.append(sig_out)
@@ -155,10 +140,15 @@ def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
             axis_ann,
             sig_ann_ls,
             sentence,
-            mode='eval',
         )
     else:
-        ValueError("Invalid processing mode: {model}")
+        sent_dict = {
+            'label' : 'None',
+            'sentence' : sentence,
+            'axis_offsets' : None,
+            'sig_offsets' : None,
+        }
+        ann_sents.append(sent_dict)
     return ann_sents
 
 
@@ -202,72 +192,53 @@ def process_ann(annotation):
 # around the entities
 # - this is another wrapper function where
 # we handle looping and some optimizations
-def merge_annotations(axis_ann, sig_ann_ls, sentence, mode='inf'):
+def merge_annotations(axis_ann, sig_ann_ls, sentence):
     merged_annotations = []
     axis_indices = process_ann(axis_ann)
     sig_indices_ls = [process_ann(sig_ann) for sig_ann in sig_ann_ls]
     ref_sent = ctakes_tok(sentence)
-    if mode == 'eval':
-        for sig_indices in sig_indices_ls:
-            ann_sent = ref_sent.copy()
-            intersects = get_intersect(sig_indices, axis_indices)
-            if intersects:
-                warnings.warn(
-                    (
-                        "Warning axis annotation and sig annotation \n"
-                        f"{ref_sent}\n"
-                        f"{axis_indices}\n"
-                        f"{sig_indices}\n"
-                        f"Have intersections at indices:\n"
-                        f"{intersects}"
-                    )
-                )
-            else:
-                for axis, sig in zip_longest(axis_indices, sig_indices):
-                    if sig is not None:
-                        s1, s2 = sig
-                        ann_sent[s1] = '<a2> ' + ann_sent[s1]
-                        ann_sent[s2] = ann_sent[s2] + ' </a2>'
-                    if axis is not None:
-                        a1, a2 = axis
-                        ann_sent[a1] = '<a1> ' + ann_sent[a1]
-                        ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                merged_annotations.append(' '.join(ann_sent))
-    elif mode == 'inf':
-        for a1, a2 in axis_indices:
-            # list of lists, only want to
-            # iterate if at least one is non-empty
-            if any(sig_indices_ls):
-                for sig_indices in sig_indices_ls:
-                    for s1, s2 in sig_indices:
-                        intersects = get_intersect([(a1, a2)], [(s1, s2)])
-                        if intersects:
-                            warnings.warn(
-                                (
-                                    "Warning axis annotation and sig annotation \n"
-                                    f"{ref_sent}\n"
-                                    f"{a1, a2}\n"
-                                    f"{s1, s2}\n"
-                                    f"Have intersections at indices:\n"
-                                    f"{intersects}"
-                                )
+    for a1, a2 in axis_indices:
+        # list of lists, only want to
+        # iterate if at least one is non-empty
+        if any(sig_indices_ls):
+            for sig_indices in sig_indices_ls:
+                for s1, s2 in sig_indices:
+                    intersects = get_intersect([(a1, a2)], [(s1, s2)])
+                    if intersects:
+                        warnings.warn(
+                            (
+                                "Warning axis annotation and sig annotation \n"
+                                f"{ref_sent}\n"
+                                f"{a1, a2}\n"
+                                f"{s1, s2}\n"
+                                f"Have intersections at indices:\n"
+                                f"{intersects}"
                             )
-                        ann_sent = ref_sent.copy()
-                        ann_sent[a1] = '<a1> ' + ann_sent[a1]
-                        ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                        ann_sent[s1] = '<a2> ' + ann_sent[s1]
-                        ann_sent[s2] = ann_sent[s2] + ' </a2>'
-                        
-                        sent_dict = {'sentence' : ' '.join(ann_sent), 'main_offsets' : (a1, a2)}
-                        merged_annotations.append(sent_dict)
-            else:
-                ann_sent = ref_sent.copy()
-                ann_sent[a1] = '<a1> ' + ann_sent[a1]
-                ann_sent[a2] = ann_sent[a2] + ' </a1>'
-                sent_dict = {'sentence' : ' '.join(ann_sent), 'main_offsets' : (a1, a2)}
-                merged_annotations.append(sent_dict)
-    else:
-        ValueError(f"Invalid processsing mode : {mode}")
+                        )
+                    ann_sent = ref_sent.copy()
+                    ann_sent[a1] = '<a1> ' + ann_sent[a1]
+                    ann_sent[a2] = ann_sent[a2] + ' </a1>'
+                    ann_sent[s1] = '<a2> ' + ann_sent[s1]
+                    ann_sent[s2] = ann_sent[s2] + ' </a2>'
+                    
+                    sent_dict = {
+                        'label' : None,
+                        'sentence' : ' '.join(ann_sent),
+                        'axis_offsets' : (a1, a2),
+                        'sig_offsets' : (s1, s2),
+                    }
+                    merged_annotations.append(sent_dict)
+        else:
+            ann_sent = ref_sent.copy()
+            ann_sent[a1] = '<a1> ' + ann_sent[a1]
+            ann_sent[a2] = ann_sent[a2] + ' </a1>'
+            sent_dict = {
+                'label' : "None",
+                'sentence' : ' '.join(ann_sent),
+                'axis_offsets' : (a1, a2),
+                'sig_offsets' : None,
+            }
+            merged_annotations.append(sent_dict)
     return merged_annotations
 
 
@@ -287,13 +258,14 @@ def get_intersect(ls1, ls2):
 # Get dictionary of final pipeline predictions
 # over annotated sentences, indexed by task name
 def get_eval_predictions(
-        model_pairs_dict,
-        deannotated_sents,
+        # model_pairs_dict,
+        sentences,
         taggers_dict,
         out_model_dict,
         axis_task,
 ):
     reannotated_sents = {}
+    """
     for task_name, task_model_pairs in model_pairs_dict.items():
         reannotated_sents[task_name] = []
         for sent, pair in zip(deannotated_sents, task_model_pairs):
@@ -309,37 +281,81 @@ def get_eval_predictions(
                 f"{reann_sent_ls}"
             )
             reannotated_sents[task_name].append(reann_sent_ls[0])
+    """
 
-    out_labels = None
-    predictions_dict = {}
+    ann_sent_groups = assemble(
+        sentences,
+        taggers_dict,
+        axis_task,
+    )
 
     for out_task, out_pipe in out_model_dict.items():
+        # Get the output for each relation classifier models,
+        # tokenizer_kwargs are passed directly
+        # text classification pipelines during __call__
+        # (Huggingface's idea not mine)
+        for ann_sent_group in ann_sent_groups:
+            axis_mention_dict = {}
+            for sent_dict in ann_sent_group:
+                axis_offsets = sent_dict['axis_offsets']
+                sig_offsets = sent_dict['sig_offsets']
+                ann_sent = sent_dict['sentence']
+                ann_label = sent_dict['label']
+                if ann_label is None:
+                    pipe_output = out_pipe(
+                        ann_sent,
+                        padding="max_length",
+                        truncation=True,
+                        is_split_into_words=True,
+                    )
 
-        out_task_processor = cnlp_processors[out_task]()
-        out_task_labels = out_task_processor.get_labels()
+                    print(ann_sent)
+                    print(sent_dict)
+                    print(pipe_output)
+                    
+                    strongest_label = max(pipe_output[0], key=lambda d: d['score'])
+                    
+                    # print(f"{axis_offsets} : {ann_sent}")
+                    # print(f"{pipe_output[0]}")
+                    # print(f"{strongest_label}")
+                    
+                    def label_update(label_dict, mention_dict, offsets):
+                        new_label = label_dict['label']
+                        new_score = label_dict['score']
+                        no_label = new_label not in mention_dict[axis_offsets].keys()
+                        if no_label:
+                            return no_label
+                        else:
+                            # higher score
+                            return new_score > mention_dict[offsets][new_label]['score']
+                        
 
-        out_label_map = {label: i for i, label in enumerate(out_task_labels)}
-        out_labels = []
-        for reann_sent in reannotated_sents[out_task]:
-            pipe_output = out_pipe(
-                reann_sent,
-                # Again, classification pipelines
-                # take tokenizer args during __call__
-                padding="max_length",
-                truncation=True,
-                is_split_into_words=True,
-            )
-            out_labels.append(out_label_map[pipe_output[0]['label']])
-        predictions_dict[out_task] = out_labels
-
-        return predictions_dict
+                    if axis_offsets not in axis_mention_dict.keys():
+                        axis_mention_dict[axis_offsets] = {}
+                        axis_label_dict = {
+                            'sentence' : ann_sent,
+                            'score' : strongest_label['score'],
+                        }
+                        axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
+                    elif label_update(strongest_label, axis_mention_dict, axis_offsets):
+                        axis_label_dict = {
+                            'sentence' : ann_sent,
+                            'score' : strongest_label['score'],
+                        }
+                        axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
+                    for labeled_dict in axis_mention_dict.values():
+                        for label, sent in labeled_dict.items():
+                            print(f"{label}, {sent['score']} : {sent['sentence']}")
+ 
+    predictions_dict = {}
+    return predictions_dict
 
 
 # Get raw sentences, as well as
 # dictionaries of labels indexed by output pipeline
 # task names
 def get_sentences_and_labels(in_file: str, mode: str, task_names):
-    task_processors = [cnlp_processors[task_name]() for task_name
+    task_processors = [cnlp_processors[classifier_to_relex[task_name]]() for task_name
                        in task_names]
     idx_labels_dict, str_labels_dict = {}, {}
     if mode == "inf":
@@ -352,24 +368,40 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
         )
     elif mode == "eval":
         # 'dev' lets us get labels without running into issues of downsampling
-        examples = task_processors[0]._create_examples(
-            task_processors[0]._read_tsv(in_file),
+        dummy_processor = task_processors[0]
+        lines = dummy_processor._read_tsv(in_file)
+        examples = dummy_processor._create_examples(
+            lines,
             "dev"
         )
 
         def example2label(example):
+            """
             if isinstance(example.label, list):
                 return [label_map[label] for label in example.label]
             else:
                 return label_map[example.label]
-
+            """
+            # Just assumed relex
+            if example.label:
+                return [ (int(start_token),int(end_token),label_map.get(category, 0)) for (start_token,end_token,category) in example.label]
+            else:
+                return 'None'
+            
         for task_name, task_processor in zip(task_names, task_processors):
             label_list = task_processor.get_labels()
             label_map = {label: i for i, label in enumerate(label_list)}
 
+            print( examples[0].text_a )
+            print( examples[0].label )
+            
+            print( examples[1].text_a )
+            print( examples[1].label )
+            
             if examples[0].label:
                 idx_labels_dict[task_name] = [example2label(ex) for ex in examples]
-                str_labels_dict[task_name] = [ex.label for ex in examples]
+                # Previously needed only for the getting model pairs issue
+                # str_labels_dict[task_name] = [ex.label for ex in examples]
             else:
                 ValueError("labels required for eval mode")
     else:
@@ -380,4 +412,4 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]
 
-    return idx_labels_dict, str_labels_dict, sentences
+    return idx_labels_dict, sentences
