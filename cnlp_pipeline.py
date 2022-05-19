@@ -207,7 +207,7 @@ def evaluation(pipeline_args):
 
     # Get the model (by task_name) pairs for each instance e.g.
     # med-dosage -> (dphe_med, dphe_dosage)
-    model_pairs_dict = get_model_pairs(str_labels_dict, taggers_dict)
+    # model_pairs_dict = get_model_pairs(str_labels_dict, taggers_dict)
 
     # Remove annotations from the sentence e.g.
     # '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'

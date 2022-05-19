@@ -24,47 +24,6 @@ from itertools import chain, groupby, tee, zip_longest
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
 
-# Get the model (by task_name) pairs for each instance e.g.
-# (task : dphe_rel) label: med-dosage -> model_pair : (dphe_med, dphe_dosage)
-def get_model_pairs(str_labels_dict, taggers_dict):
-    model_pairs = {}
-    model_names = [key for key, value in taggers_dict.items()]
-    # Used to get the relevant models from the label name,
-    # e.g. med-dosage -> med, dosage -> dphe-med, dphe-dosage,
-    # -> taggers_dict[dphe-med], taggers_dict[dphe-dosage]
-
-    def partial_match(s1, s2):
-        part = min(len(s1), len(s2))
-        return s1[:part] == s2[:part]
-    for task_name, labels in str_labels_dict.items():
-        model_pairs[task_name] = []
-        for label in labels:
-            axis_tag, sig_tag = label.split('-')
-            # Get the first (only) model/task name
-            # the end of which matches the axis tag
-            axis_model = list(
-                filter(
-                    lambda x: partial_match(x.split('_')[-1], axis_tag),
-                    model_names
-                )
-            )[0]
-            # Get the first (only) model/task name
-            # the end of which matches the axis tag
-            sig_model = list(
-                filter(
-                    lambda x: partial_match(x.split('_')[-1], sig_tag),
-                    model_names
-                )
-            )[0]
-            model_pairs[task_name].append((axis_model, sig_model))
-        assert len(model_pairs[task_name]) == len(str_labels_dict[task_name]), (
-            "Wrong lengths"
-            f"task model pairs : {model_pairs[task_name]}"
-            f"task labels : {str_labels_dict[task_name]}"
-        )
-    return model_pairs
-
-
 # Get dictionary of entity tagging models/pipelines
 # and relation extraction models/pipelines
 # both indexed by task names
