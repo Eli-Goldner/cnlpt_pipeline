@@ -78,6 +78,7 @@ def model_dicts(models_dir, mode='inf'):
             # Add classification pipelines to the classification dictionary
             elif cnlp_output_modes[task_name] == classification:
                 classifier = None
+                """
                 if mode == 'inf':
                     classifier = ClassificationPipeline(
                         model=model,
@@ -95,6 +96,16 @@ def model_dicts(models_dir, mode='inf'):
                     )
                 else:
                     ValueError("Invalid processing mode")
+                """
+                # now doing return_all_scores
+                # no matter what
+                classifier = ClassificationPipeline(
+                    model=model,
+                    tokenizer=tokenizer,
+                    return_all_scores=True,
+                    task_processor=task_processor,
+                    device=main_device,
+                )
                 out_model_dict[task_name] = classifier
             # Tasks other than tagging and sentence/relation classification
             # not supported for now since I wasn't sure how to fit them in
