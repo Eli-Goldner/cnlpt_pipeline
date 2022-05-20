@@ -283,24 +283,6 @@ def get_eval_predictions(
         out_model_dict,
         axis_task,
 ):
-    reannotated_sents = {}
-    """
-    for task_name, task_model_pairs in model_pairs_dict.items():
-        reannotated_sents[task_name] = []
-        for sent, pair in zip(deannotated_sents, task_model_pairs):
-            tagger_pair_dict = {key: taggers_dict[key] for key in pair}
-            reann_sent_ls = _assemble(
-                sent,
-                tagger_pair_dict,
-                axis_task,
-                mode='eval'
-            )
-            assert len(reann_sent_ls) == 1, (
-                "_assemble is misbehaving: \n"
-                f"{reann_sent_ls}"
-            )
-            reannotated_sents[task_name].append(reann_sent_ls[0])
-    """
 
     ann_sent_groups = assemble(
         sentences,
@@ -308,7 +290,30 @@ def get_eval_predictions(
         axis_task,
     )
 
+    predictions_dict = {}
+
+    def dict_to_label_list(mention_dict):
+        label_list = []
+        for axis_offsets, labeled_dict in mention_dict.items():
+            axis_idx, _ = axis_offsets
+            for label, sent_dict in labeled_dict.items():
+                sig_idx, _ = sent_dict["sig_offsets"]
+                first = min(sig_idx, axis_idx)
+                second = max(sig_idx, axis_idx)
+                label_list.append((first, second, label))
+    
+    def label_update(label_dict, mention_dict, offsets):
+        new_label = label_dict['label']
+        new_score = label_dict['score']
+        no_label = new_label not in mention_dict[axis_offsets].keys()
+        if no_label:
+            return no_label
+        else:
+            # higher score
+            return new_score > mention_dict[offsets][new_label]['score'] 
+
     for out_task, out_pipe in out_model_dict.items():
+        out_pipe_predictions = []
         # Get the output for each relation classifier models,
         # tokenizer_kwargs are passed directly
         # text classification pipelines during __call__
@@ -327,50 +332,28 @@ def get_eval_predictions(
                         truncation=True,
                         is_split_into_words=True,
                     )
-
-                    print(ann_label)
-                    print(axis_offsets)
-                    print(sig_offsets)
                     
-                    print(ann_sent)
-                    print(sent_dict)
-                    print(pipe_output)
-                    
-                    strongest_label = max(pipe_output[0], key=lambda d: d['score'])
-                    
-                    print(f"{axis_offsets} : {ann_sent}")
-                    print(f"{pipe_output[0]}")
-                    print(f"{strongest_label}")
-                    
-                    def label_update(label_dict, mention_dict, offsets):
-                        new_label = label_dict['label']
-                        new_score = label_dict['score']
-                        no_label = new_label not in mention_dict[axis_offsets].keys()
-                        if no_label:
-                            return no_label
-                        else:
-                            # higher score
-                            return new_score > mention_dict[offsets][new_label]['score']
-                        
+                    strongest_label = max(pipe_output[0], key=lambda d: d['score'])                       
 
                     if axis_offsets not in axis_mention_dict.keys():
                         axis_mention_dict[axis_offsets] = {}
                         axis_label_dict = {
                             'sentence' : ann_sent,
                             'score' : strongest_label['score'],
+                            'sig_offsets' : sig_offsets,
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
                     elif label_update(strongest_label, axis_mention_dict, axis_offsets):
                         axis_label_dict = {
                             'sentence' : ann_sent,
                             'score' : strongest_label['score'],
+                            'sig_offsets' : sig_offsets,
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
-                    for labeled_dict in axis_mention_dict.values():
-                        for label, sent in labeled_dict.items():
-                            print(f"{label}, {sent['score']} : {sent['sentence']}")
- 
-    predictions_dict = {}
+                    
+            out_pipe_predictions.append(dict_to_label_list(axis_mention_dict))
+        predictions_dict[out_task] = out_pipe_predictions
+                             
     return predictions_dict
 
 
@@ -414,12 +397,6 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
         for task_name, task_processor in zip(task_names, task_processors):
             label_list = task_processor.get_labels()
             label_map = {label: i for i, label in enumerate(label_list)}
-
-            print( examples[0].text_a )
-            print( examples[0].label )
-            
-            print( examples[1].text_a )
-            print( examples[1].label )
             
             if examples[0].label:
                 idx_labels_dict[task_name] = [example2label(ex) for ex in examples]

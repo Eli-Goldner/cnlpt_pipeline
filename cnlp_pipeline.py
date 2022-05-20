@@ -9,8 +9,8 @@ from .cnlp_pipeline_utils import (
     model_dicts,
     get_sentences_and_labels,
     assemble,
-    # get_model_pairs,
     get_eval_predictions,
+    classifier_to_relex 
 )
 
 from .cnlp_processors import cnlp_compute_metrics
@@ -191,43 +191,26 @@ def evaluation(pipeline_args):
         mode='eval',
     )
 
-    # Assume sentences are annotated and clean them anyway
-    # for eval we will need the index based labels organized by out task
-    # as well as the string labels organized by out task
-    # (for finding relevant model pairs)
-    (
-        idx_labels_dict,
-        # str_labels_dict,
-        annotated_sents
-    ) = get_sentences_and_labels(
+    idx_labels_dict, annotated_sents = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
         task_names=out_model_dict.keys(),
     )
 
-    # Get the model (by task_name) pairs for each instance e.g.
-    # med-dosage -> (dphe_med, dphe_dosage)
-    # model_pairs_dict = get_model_pairs(str_labels_dict, taggers_dict)
-
-    # Remove annotations from the sentence e.g.
-    # '<a1> tamoxifen </a1>, <a2> 20 mg </a2> once daily'
-    # -> 'tamoxifen , 20 mg once daily'
-    # def deannotate(s):
-    #    return re.sub(r"</?a[1-2]>", "", s)
-    
-    # deannotated_sents = map(deannotate, annotated_sents)
-
-    # Get dictionary of predictions
-    # indexed by task
     predictions_dict = get_eval_predictions(
-        # model_pairs_dict,
-        # deannotated_sents,
         annotated_sents,
         taggers_dict,
         out_model_dict,
         pipeline_args.axis_task,
     )
 
+    for task_name, predictions in predictions_dict.items():
+        report = cnlp_compute_metrics(
+            classifier_to_relex(task_name),
+            np.array(predictions),
+            np.array(idx_labels_dict[task_name])
+        )
+        print(report)
 
 if __name__ == "__main__":
     main()
