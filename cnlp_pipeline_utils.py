@@ -317,15 +317,19 @@ def get_eval_predictions(
                         is_split_into_words=True,
                     )
 
+                    print(ann_label)
+                    print(axis_offsets)
+                    print(sig_offsets)
+                    
                     print(ann_sent)
                     print(sent_dict)
                     print(pipe_output)
                     
                     strongest_label = max(pipe_output[0], key=lambda d: d['score'])
                     
-                    # print(f"{axis_offsets} : {ann_sent}")
-                    # print(f"{pipe_output[0]}")
-                    # print(f"{strongest_label}")
+                    print(f"{axis_offsets} : {ann_sent}")
+                    print(f"{pipe_output[0]}")
+                    print(f"{strongest_label}")
                     
                     def label_update(label_dict, mention_dict, offsets):
                         new_label = label_dict['label']
