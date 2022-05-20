@@ -1,5 +1,6 @@
 import os
 import re
+import torch
 import warnings
 
 from .cnlp_processors import (
@@ -29,6 +30,10 @@ SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg
 # and relation extraction models/pipelines
 # both indexed by task names
 def model_dicts(models_dir, mode='inf'):
+    # Pipelines go to CPU (-1) by default so if
+    # available send to GPU (0)
+    main_device = 0 if torch.cuda.is_available() else -1
+    
     taggers_dict = {}
     out_model_dict = {}
 
@@ -67,7 +72,8 @@ def model_dicts(models_dir, mode='inf'):
                 taggers_dict[task_name] = TaggingPipeline(
                     model=model,
                     tokenizer=tokenizer,
-                    task_processor=task_processor
+                    task_processor=task_processor,
+                    device=main_device,
                 )
             # Add classification pipelines to the classification dictionary
             elif cnlp_output_modes[task_name] == classification:
@@ -77,13 +83,15 @@ def model_dicts(models_dir, mode='inf'):
                         model=model,
                         tokenizer=tokenizer,
                         return_all_scores=True,
-                        task_processor=task_processor
+                        task_processor=task_processor,
+                        device=main_device,
                     )
                 elif mode == 'eval':
                     classifier = ClassificationPipeline(
                         model=model,
                         tokenizer=tokenizer,
-                        task_processor=task_processor
+                        task_processor=task_processor,
+                        device=main_device,
                     )
                 else:
                     ValueError("Invalid processing mode")
