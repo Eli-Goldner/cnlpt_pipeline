@@ -258,7 +258,7 @@ def relex_label_to_matrix(relex_label, max_len):
     sent_labels = np.zeros((max_len, max_len))
     for first_idx, second_idx, label in relex_label:
         sent_labels[first_idx][second_idx] = label
-    
+    return sent_labels
 
 # Get dictionary of final pipeline predictions
 # over annotated sentences, indexed by task name
@@ -337,7 +337,13 @@ def get_eval_predictions(
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
                     
-            out_pipe_predictions.append(dict_to_label_list(axis_mention_dict))
+            out_pipe_predictions.append(
+                relex_label_to_matrix(
+                    dict_to_label_list(
+                        axis_mention_dict
+                    )
+                )
+            )
         predictions_dict[out_task] = out_pipe_predictions
                              
     return predictions_dict

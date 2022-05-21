@@ -10,10 +10,10 @@ from .cnlp_pipeline_utils import (
     get_sentences_and_labels,
     assemble,
     get_eval_predictions,
-    classifier_to_relex 
+    relex_label_to_matrix
 )
 
-from .cnlp_processors import cnlp_compute_metrics
+from .cnlp_processors import classifier_to_relex, cnlp_compute_metrics
 
 from .CnlpModelForClassification import CnlpModelForClassification, CnlpConfig
 
