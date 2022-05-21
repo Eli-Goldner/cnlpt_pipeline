@@ -112,7 +112,7 @@ def inference(pipeline_args):
     )
 
     # Only need raw sentences for inference
-    _, _, sentences = get_sentences_and_labels(
+    _, sentences, _ = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="inf",
         task_names=out_model_dict.keys(),
@@ -191,7 +191,7 @@ def evaluation(pipeline_args):
         mode='eval',
     )
 
-    idx_labels_dict, annotated_sents = get_sentences_and_labels(
+    idx_labels_dict, annotated_sents, max_len = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
         task_names=out_model_dict.keys(),

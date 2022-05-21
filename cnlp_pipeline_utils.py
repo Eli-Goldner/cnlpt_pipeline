@@ -78,25 +78,6 @@ def model_dicts(models_dir, mode='inf'):
             # Add classification pipelines to the classification dictionary
             elif cnlp_output_modes[task_name] == classification:
                 classifier = None
-                """
-                if mode == 'inf':
-                    classifier = ClassificationPipeline(
-                        model=model,
-                        tokenizer=tokenizer,
-                        return_all_scores=True,
-                        task_processor=task_processor,
-                        device=main_device,
-                    )
-                elif mode == 'eval':
-                    classifier = ClassificationPipeline(
-                        model=model,
-                        tokenizer=tokenizer,
-                        task_processor=task_processor,
-                        device=main_device,
-                    )
-                else:
-                    ValueError("Invalid processing mode")
-                """
                 # now doing return_all_scores
                 # no matter what
                 classifier = ClassificationPipeline(
@@ -273,6 +254,11 @@ def get_intersect(ls1, ls2):
             sup = min(i[1] for i in ls)
     return out
 
+def relex_label_to_matrix(relex_label, max_len):
+    sent_labels = np.zeros((max_len, max_len))
+    for first_idx, second_idx, label in relex_label:
+        sent_labels[first_idx][second_idx] = label
+    
 
 # Get dictionary of final pipeline predictions
 # over annotated sentences, indexed by task name
@@ -407,9 +393,14 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
     else:
         ValueError("Mode must be either inference or eval")
 
+    max_len = -1
+    def get_sent_len(sent):
+        return len(ctakes_tok(sent))
+    
     if examples[0].text_b is None:
         sentences = [example.text_a for example in examples]
+        max_len = max(sentences, key=get_sent_len)
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]
 
-    return idx_labels_dict, sentences
+    return idx_labels_dict, sentences, max_len
