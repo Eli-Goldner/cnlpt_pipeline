@@ -2,6 +2,7 @@ import os
 import re
 import torch
 import warnings
+import numpy as np
 
 from .cnlp_processors import (
     cnlp_processors,
@@ -254,10 +255,10 @@ def get_intersect(ls1, ls2):
             sup = min(i[1] for i in ls)
     return out
 
-def relex_label_to_matrix(relex_label, max_len):
+def relex_label_to_matrix(relex_label, label_map, max_len):
     sent_labels = np.zeros((max_len, max_len))
     for first_idx, second_idx, label in relex_label:
-        sent_labels[first_idx][second_idx] = label
+        sent_labels[first_idx][second_idx] = label_map[label]
     return sent_labels
 
 # Get dictionary of final pipeline predictions
@@ -268,6 +269,7 @@ def get_eval_predictions(
         taggers_dict,
         out_model_dict,
         axis_task,
+        max_len,
 ):
 
     ann_sent_groups = assemble(
@@ -287,7 +289,8 @@ def get_eval_predictions(
                 first = min(sig_idx, axis_idx)
                 second = max(sig_idx, axis_idx)
                 label_list.append((first, second, label))
-    
+        return label_list
+                
     def label_update(label_dict, mention_dict, offsets):
         new_label = label_dict['label']
         new_score = label_dict['score']
@@ -304,6 +307,10 @@ def get_eval_predictions(
         # tokenizer_kwargs are passed directly
         # text classification pipelines during __call__
         # (Huggingface's idea not mine)
+        task_processor = cnlp_processors[classifier_to_relex[out_task]]() 
+        label_list = task_processor.get_labels()
+        label_map = {label: i for i, label in enumerate(label_list)}
+        
         for ann_sent_group in ann_sent_groups:
             axis_mention_dict = {}
             for sent_dict in ann_sent_group:
@@ -336,12 +343,14 @@ def get_eval_predictions(
                             'sig_offsets' : sig_offsets,
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
-                    
+
             out_pipe_predictions.append(
                 relex_label_to_matrix(
                     dict_to_label_list(
                         axis_mention_dict
-                    )
+                    ),
+                    label_map,
+                    max_len,
                 )
             )
         predictions_dict[out_task] = out_pipe_predictions
@@ -374,12 +383,6 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
         )
 
         def example2label(example):
-            """
-            if isinstance(example.label, list):
-                return [label_map[label] for label in example.label]
-            else:
-                return label_map[example.label]
-            """
             # Just assumed relex
             if example.label:
                 return [ (int(start_token),int(end_token),label_map.get(category, 0)) for (start_token,end_token,category) in example.label]
@@ -389,8 +392,9 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
         for task_name, task_processor in zip(task_names, task_processors):
             label_list = task_processor.get_labels()
             label_map = {label: i for i, label in enumerate(label_list)}
-            
-            if examples[0].label:
+
+            # Adjusted for 'relex'
+            if examples[0].label is not None:
                 idx_labels_dict[task_name] = [example2label(ex) for ex in examples]
                 # Previously needed only for the getting model pairs issue
                 # str_labels_dict[task_name] = [ex.label for ex in examples]
@@ -405,7 +409,7 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
     
     if examples[0].text_b is None:
         sentences = [example.text_a for example in examples]
-        max_len = max(sentences, key=get_sent_len)
+        max_len = len(max(sentences, key=get_sent_len))
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]
 

@@ -202,11 +202,14 @@ def evaluation(pipeline_args):
         taggers_dict,
         out_model_dict,
         pipeline_args.axis_task,
+        max_len,
     )
-
+    
     for task_name, predictions in predictions_dict.items():
+        print(predictions)
+        print(idx_labels_dict)
         report = cnlp_compute_metrics(
-            classifier_to_relex(task_name),
+            classifier_to_relex[task_name],
             np.array(predictions),
             np.array(idx_labels_dict[task_name])
         )

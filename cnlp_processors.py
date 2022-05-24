@@ -44,6 +44,9 @@ def relation_metrics(task_name, preds, labels):
     processor = cnlp_processors[task_name]()
     label_set = processor.get_labels()
 
+    print(f"{task_name} : {label_set}")
+    print(f"preds shape {preds.shape} labels shape {labels.shape}")
+    
     # If we are using the attention-based relation extractor, many impossible pairs
     # are set to -100 so pytorch loss functions ignore them. We need to make sure the
     # scorer also ignores them.
@@ -110,7 +113,7 @@ def cnlp_compute_metrics(task_name, preds, labels):
         return { 'f1': fix_np_types(f1_score(y_true=labels, y_pred=preds, average=None))} #acc_and_f1(preds, labels)
     elif task_name == 'timex' or task_name == 'event' or task_name == 'dphe' or task_name in dphe_tagging:
         return tagging_metrics(task_name, preds, labels)
-    elif task_name == 'tlink-sent':
+    elif task_name == 'tlink-sent' or task_name == 'dphe_end2end':
         return relation_metrics(task_name, preds, labels)
     elif cnlp_output_modes[task_name] == classification:
         logger.warn("Choosing accuracy and f1 as default metrics; modify cnlp_compute_metrics() to customize for this task.")
