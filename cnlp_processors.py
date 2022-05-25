@@ -43,20 +43,17 @@ def relation_metrics(task_name, preds, labels):
 
     processor = cnlp_processors[task_name]()
     label_set = processor.get_labels()
-
-    print(f"{task_name} : {label_set}")
-    print(f"preds shape {preds.shape} labels shape {labels.shape}")
     
     # If we are using the attention-based relation extractor, many impossible pairs
     # are set to -100 so pytorch loss functions ignore them. We need to make sure the
     # scorer also ignores them.
     relevant_inds = np.where(labels != -100)
-    relevant_labels = labels[relevant_inds]
-    relevant_preds = preds[relevant_inds]
+    relevant_labels = labels[relevant_inds].astype('int')
+    relevant_preds = preds[relevant_inds].astype('int')
 
     num_correct = (relevant_labels == relevant_preds).sum()
     acc = num_correct / len(relevant_preds)
-
+    
     recall = recall_score(y_pred=relevant_preds, y_true=relevant_labels, average=None)
     precision = precision_score(y_pred=relevant_preds, y_true=relevant_labels, average=None)
     f1_report = f1_score(y_true=relevant_labels, y_pred=relevant_preds, average=None)

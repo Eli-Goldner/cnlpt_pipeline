@@ -191,13 +191,17 @@ def evaluation(pipeline_args):
         mode='eval',
     )
 
-    idx_labels_dict, annotated_sents, max_len = get_sentences_and_labels(
+    (
+        idx_labels_dict,
+        annotated_sents,
+        max_len,
+    ) = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
         task_names=out_model_dict.keys(),
     )
 
-    predictions_dict = get_eval_predictions(
+    predictions_dict, local_relex = get_eval_predictions(
         annotated_sents,
         taggers_dict,
         out_model_dict,
@@ -206,12 +210,10 @@ def evaluation(pipeline_args):
     )
     
     for task_name, predictions in predictions_dict.items():
-        print(predictions)
-        print(idx_labels_dict)
         report = cnlp_compute_metrics(
             classifier_to_relex[task_name],
             np.array(predictions),
-            np.array(idx_labels_dict[task_name])
+            np.array([local_relex(item) for item in idx_labels_dict[task_name]])
         )
         print(report)
 

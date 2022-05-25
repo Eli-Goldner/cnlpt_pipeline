@@ -257,8 +257,13 @@ def get_intersect(ls1, ls2):
 
 def relex_label_to_matrix(relex_label, label_map, max_len):
     sent_labels = np.zeros((max_len, max_len))
-    for first_idx, second_idx, label in relex_label:
-        sent_labels[first_idx][second_idx] = label_map[label]
+    if relex_label != 'None':
+        for first_idx, second_idx, label in relex_label:
+            if isinstance(label, str):
+                label_idx = label_map[label]
+            else:
+                label_idx = label
+            sent_labels[first_idx][second_idx] = label_idx
     return sent_labels
 
 # Get dictionary of final pipeline predictions
@@ -281,14 +286,17 @@ def get_eval_predictions(
     predictions_dict = {}
 
     def dict_to_label_list(mention_dict):
+        if not mention_dict.items():
+            return 'None'
         label_list = []
         for axis_offsets, labeled_dict in mention_dict.items():
             axis_idx, _ = axis_offsets
             for label, sent_dict in labeled_dict.items():
                 sig_idx, _ = sent_dict["sig_offsets"]
-                first = min(sig_idx, axis_idx)
-                second = max(sig_idx, axis_idx)
-                label_list.append((first, second, label))
+                #first = min(sig_idx, axis_idx)
+                #second = max(sig_idx, axis_idx)
+                # I got that wrong earlier
+                label_list.append((axis_idx, sig_idx, label))
         return label_list
                 
     def label_update(label_dict, mention_dict, offsets):
@@ -354,8 +362,13 @@ def get_eval_predictions(
                 )
             )
         predictions_dict[out_task] = out_pipe_predictions
-                             
-    return predictions_dict
+        def local_relex_matrix(new_label_list):
+            return relex_label_to_matrix(
+                new_label_list,
+                label_map,
+                max_len,
+            )
+    return predictions_dict, local_relex_matrix
 
 
 # Get raw sentences, as well as
@@ -409,7 +422,7 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
     
     if examples[0].text_b is None:
         sentences = [example.text_a for example in examples]
-        max_len = len(max(sentences, key=get_sent_len))
+        max_len = get_sent_len(max(sentences, key=get_sent_len))
     else:
         sentences = [(example.text_a, example.text_b) for example in examples]
 
