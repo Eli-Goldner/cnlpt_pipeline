@@ -310,7 +310,8 @@ def get_eval_predictions(
             return new_score > mention_dict[offsets][new_label]['score'] 
 
     for out_task, out_pipe in out_model_dict.items():
-        out_pipe_predictions = []
+        out_pipe_predictions_matrices = []
+        out_pipe_predictions_tuples = []
         # Get the output for each relation classifier models,
         # tokenizer_kwargs are passed directly
         # text classification pipelines during __call__
@@ -352,16 +353,20 @@ def get_eval_predictions(
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
 
-            out_pipe_predictions.append(
+            sent_label_tuples = dict_to_label_list(axis_mention_dict) 
+            out_pipe_predictions_matrices.append(
                 relex_label_to_matrix(
-                    dict_to_label_list(
-                        axis_mention_dict
-                    ),
+                    sent_label_tuples,
                     label_map,
                     max_len,
                 )
             )
-        predictions_dict[out_task] = out_pipe_predictions
+
+            out_pipe_predictions_tuples.append(sent_label_tuples)
+        predictions_dict[out_task] = (
+            out_pipe_predictions_matrices,
+            out_pipe_predictions_tuples,
+        )
         def local_relex_matrix(new_label_list):
             return relex_label_to_matrix(
                 new_label_list,

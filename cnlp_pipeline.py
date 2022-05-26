@@ -209,10 +209,11 @@ def evaluation(pipeline_args):
         max_len,
     )
     
-    for task_name, predictions in predictions_dict.items():
+    for task_name, predictions_bundle in predictions_dict.items():
+        predictions_matrices, _ = predictions_bundle
         report = cnlp_compute_metrics(
             classifier_to_relex[task_name],
-            np.array(predictions),
+            np.array(predictions_matrices),
             np.array([local_relex(item) for item in idx_labels_dict[task_name]])
         )
         print(report)
