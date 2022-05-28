@@ -2,6 +2,7 @@ import os
 import random
 from os.path import basename, dirname
 import time
+import sklearn
 import logging
 import json
 
@@ -51,6 +52,12 @@ def relation_metrics(task_name, preds, labels):
     relevant_labels = labels[relevant_inds].astype('int')
     relevant_preds = preds[relevant_inds].astype('int')
 
+    ids_present_in_labels = fix_np_types(np.unique(relevant_labels))
+    ids_present_in_predictions = fix_np_types(np.unique(relevant_preds))
+
+    classes_present_in_labels = [label_set[i] for i in ids_present_in_labels]
+    classes_present_in_preds = [label_set[i] for i in ids_present_in_predictions]
+    
     num_correct = (relevant_labels == relevant_preds).sum()
     acc = num_correct / len(relevant_preds)
     
@@ -58,7 +65,22 @@ def relation_metrics(task_name, preds, labels):
     precision = precision_score(y_pred=relevant_preds, y_true=relevant_labels, average=None)
     f1_report = f1_score(y_true=relevant_labels, y_pred=relevant_preds, average=None)
 
-    return {'f1': fix_np_types(f1_report), 'acc': acc, 'recall':fix_np_types(recall), 'precision':fix_np_types(precision) }
+    _, _, _, support = sklearn.metrics.precision_recall_fscore_support(
+        y_true=relevant_labels,
+        y_pred=relevant_preds,
+        average=None
+    )
+ 
+    
+    return {
+        'f1': fix_np_types(f1_report),
+        'acc': acc,
+        'recall':fix_np_types(recall),
+        'precision':fix_np_types(precision),
+        'support' : fix_np_types(support),
+        'classes present in labels' : classes_present_in_labels,
+        'classes present in predictions' : classes_present_in_preds,
+    }
 
 def fix_np_types(input_variable):
     ''' in the mtl classification setting, f1 is an array, and when the HF library
