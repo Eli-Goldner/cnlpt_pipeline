@@ -285,38 +285,42 @@ def get_eval_predictions(
 
     predictions_dict = {}
 
+    # Given an axial/anchor mention,
+    # each will have a dictionary of of signature
+    # mentions, a label (or lack thereof)
+    # associated with it, we turn this into a cnlpt
+    # style list of triples of
+    # (<axis starting token id>,
+    # <signature starting token id>,
+    # <label>)
     def dict_to_label_list(mention_dict):
         if not mention_dict.items():
             return 'None'
         label_list = []
         for axis_offsets, labeled_dict in mention_dict.items():
-            axis_idx, _ = axis_offsets
+            axis_start_idx, _ = axis_offsets
             for label, sent_dict in labeled_dict.items():
-                sig_idx, _ = sent_dict["sig_offsets"]
-                #first = min(sig_idx, axis_idx)
-                #second = max(sig_idx, axis_idx)
-                # I got that wrong earlier
-                label_list.append((axis_idx, sig_idx, label))
+                sig_start_idx, _ = sent_dict["sig_offsets"]
+                label_list.append((axis_start_idx, sig_start_idx, label))
         return label_list
-                
+
+    # Function to check if there's a label for a pair with a stronger
+    # signal than the current one
     def label_update(label_dict, mention_dict, offsets):
         new_label = label_dict['label']
         new_score = label_dict['score']
         no_label = new_label not in mention_dict[axis_offsets].keys()
         if no_label:
+            # If there's no label and we have one on hand select that
             return no_label
         else:
             # higher score
             return new_score > mention_dict[offsets][new_label]['score'] 
-
+ 
     for out_task, out_pipe in out_model_dict.items():
         out_pipe_predictions_matrices = []
         out_pipe_predictions_tuples = []
-        # Get the output for each relation classifier models,
-        # tokenizer_kwargs are passed directly
-        # text classification pipelines during __call__
-        # (Huggingface's idea not mine)
-        task_processor = cnlp_processors[classifier_to_relex[out_task]]() 
+       task_processor = cnlp_processors[classifier_to_relex[out_task]]() 
         label_list = task_processor.get_labels()
         label_map = {label: i for i, label in enumerate(label_list)}
         
@@ -328,15 +332,23 @@ def get_eval_predictions(
                 ann_sent = sent_dict['sentence']
                 ann_label = sent_dict['label']
                 if ann_label is None:
+                    # Get the output for each relation classifier models,
+                    # tokenizer_kwargs are passed directly
+                    # text classification pipelines during __call__
+                    # (Huggingface's idea not mine)
                     pipe_output = out_pipe(
                         ann_sent,
                         padding="max_length",
                         truncation=True,
                         is_split_into_words=True,
                     )
-                    
+
+                    # For the pair, pick the label with the strongest signal
                     strongest_label = max(pipe_output[0], key=lambda d: d['score'])                       
 
+                    # If there's no label of any kind for the axis mention
+                    # we need to update the label for that and the
+                    # current signature major
                     if axis_offsets not in axis_mention_dict.keys():
                         axis_mention_dict[axis_offsets] = {}
                         axis_label_dict = {
@@ -345,6 +357,9 @@ def get_eval_predictions(
                             'sig_offsets' : sig_offsets,
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
+                    # Also need to update if there's either no label for this particular
+                    # axis/signature pair or if there's a new label for the pair that
+                    # has a stronger signal than the current label 
                     elif label_update(strongest_label, axis_mention_dict, axis_offsets):
                         axis_label_dict = {
                             'sentence' : ann_sent,
@@ -353,8 +368,11 @@ def get_eval_predictions(
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
 
-            sent_label_tuples = dict_to_label_list(axis_mention_dict) 
+            # Turn the dict structure used for comparing label scores
+            # into a set of axis token idx, sig token idx, label tuples
+            sent_label_tuples = dict_to_label_list(axis_mention_dict)
             out_pipe_predictions_matrices.append(
+                # turn the tuples into label matrix
                 relex_label_to_matrix(
                     sent_label_tuples,
                     label_map,
@@ -367,12 +385,18 @@ def get_eval_predictions(
             out_pipe_predictions_matrices,
             out_pipe_predictions_tuples,
         )
+
+        # How to convert the sentence
+        # ground truth labels into the
+        # same matrix format as the predictions
+        # outside the function for scoring
         def local_relex_matrix(new_label_list):
             return relex_label_to_matrix(
                 new_label_list,
                 label_map,
                 max_len,
             )
+        
     return predictions_dict, local_relex_matrix
 
 
