@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import numpy as np
 
@@ -10,7 +9,6 @@ from .cnlp_pipeline_utils import (
     get_sentences_and_labels,
     assemble,
     get_eval_predictions,
-    relex_label_to_matrix
 )
 
 from .cnlp_processors import classifier_to_relex, cnlp_compute_metrics
@@ -106,10 +104,7 @@ def inference(pipeline_args):
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
-    taggers_dict, out_model_dict = model_dicts(
-        pipeline_args.models_dir,
-        mode='inf',
-    )
+    taggers_dict, out_model_dict = model_dicts(pipeline_args.models_dir)
 
     # Only need raw sentences for inference
     _, sentences, _ = get_sentences_and_labels(
@@ -134,7 +129,6 @@ def inference(pipeline_args):
         # Get the output for each relation classifier models,
         # tokenizer_kwargs are passed directly
         # text classification pipelines during __call__
-        # (Huggingface's idea not mine)
         for ann_sent_group in ann_sent_groups:
             axis_mention_dict = {}
             for sent_dict in ann_sent_group:
@@ -148,10 +142,6 @@ def inference(pipeline_args):
                 )
                 
                 strongest_label = max(pipe_output[0], key=lambda d: d['score'])
-
-                # print(f"{main_offsets} : {ann_sent}")
-                # print(f"{pipe_output[0]}")
-                # print(f"{strongest_label}")
                 
                 def label_update(label_dict, mention_dict, offsets):
                     new_label = label_dict['label']
@@ -162,19 +152,18 @@ def inference(pipeline_args):
                     else:
                         # higher score
                         return new_score > mention_dict[offsets][new_label]['score']
-                        
 
                 if main_offsets not in axis_mention_dict.keys():
                     axis_mention_dict[main_offsets] = {}
                     axis_label_dict = {
-                        'sentence' : ann_sent,
-                        'score' : strongest_label['score'],
+                        'sentence': ann_sent,
+                        'score': strongest_label['score'],
                     }
                     axis_mention_dict[main_offsets][strongest_label['label']] = axis_label_dict
                 elif label_update(strongest_label, axis_mention_dict, main_offsets):
                     axis_label_dict = {
-                        'sentence' : ann_sent,
-                        'score' : strongest_label['score'],
+                        'sentence': ann_sent,
+                        'score': strongest_label['score'],
                     }
                     axis_mention_dict[main_offsets][strongest_label['label']] = axis_label_dict
             for labeled_dict in axis_mention_dict.values():
@@ -186,15 +175,12 @@ def evaluation(pipeline_args):
     AutoConfig.register("cnlpt", CnlpConfig)
     AutoModel.register(CnlpConfig, CnlpModelForClassification)
 
-    taggers_dict, out_model_dict = model_dicts(
-        pipeline_args.models_dir,
-        mode='eval',
-    )
+    taggers_dict, out_model_dict = model_dicts(pipeline_args.models_dir)
 
     (
         idx_labels_dict,
         annotated_sents,
-        max_len,
+        split_max_len,
     ) = get_sentences_and_labels(
         in_file=pipeline_args.in_file,
         mode="eval",
@@ -206,17 +192,25 @@ def evaluation(pipeline_args):
         taggers_dict,
         out_model_dict,
         pipeline_args.axis_task,
-        max_len,
     )
     
-    for task_name, predictions_bundle in predictions_dict.items():
-        predictions_matrices, _ = predictions_bundle
+    # for task_name, predictions_bundle in predictions_dict.items():
+    for task_name, prediction_tuples in predictions_dict.items():
+        # predictions_matrices, _ = predictions_bundle
         report = cnlp_compute_metrics(
             classifier_to_relex[task_name],
-            np.array(predictions_matrices),
-            np.array([local_relex(item) for item in idx_labels_dict[task_name]])
+            # np.array(predictions_matrices),
+            np.array(
+                [local_relex(sent_preds, split_max_len) for
+                 sent_preds in prediction_tuples]
+            ),
+            np.array(
+                [local_relex(sent_labels, split_max_len) for
+                 sent_labels in idx_labels_dict[task_name]]
+            )
         )
         print(report)
+
 
 if __name__ == "__main__":
     main()

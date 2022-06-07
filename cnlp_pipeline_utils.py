@@ -22,7 +22,7 @@ from transformers import AutoConfig, AutoTokenizer
 
 from heapq import merge
 
-from itertools import chain, groupby, tee, zip_longest
+from itertools import groupby, tee
 
 SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg>']
 
@@ -30,7 +30,7 @@ SPECIAL_TOKENS = ['<e>', '</e>', '<a1>', '</a1>', '<a2>', '</a2>', '<cr>', '<neg
 # Get dictionary of entity tagging models/pipelines
 # and relation extraction models/pipelines
 # both indexed by task names
-def model_dicts(models_dir, mode='inf'):
+def model_dicts(models_dir):
     # Pipelines go to CPU (-1) by default so if
     # available send to GPU (0)
     main_device = 0 if torch.cuda.is_available() else -1
@@ -78,7 +78,6 @@ def model_dicts(models_dir, mode='inf'):
                 )
             # Add classification pipelines to the classification dictionary
             elif cnlp_output_modes[task_name] == classification:
-                classifier = None
                 # now doing return_all_scores
                 # no matter what
                 classifier = ClassificationPipeline(
@@ -113,7 +112,7 @@ def assemble(sentences, taggers_dict, axis_task):
     # Return one list of all the system prediction annotations
     # for each sentences
     def process(sent):
-        return _assemble(sent, taggers_dict, axis_task, mode='inf')
+        return _assemble(sent, taggers_dict, axis_task)
     return map(process, sentences)
 
 
@@ -121,7 +120,7 @@ def assemble(sentences, taggers_dict, axis_task):
 # return the sentence annotated by the taggers
 # - can be used for inference mode by passing the entire dictionary of taggers
 # - can be used for eval mode by passing the model pair for that sentence
-def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
+def _assemble(sentence, taggers_dict, axis_task):
     axis_pipe = taggers_dict[axis_task]
     axis_ann = axis_pipe(sentence)
     # We split by mode cases since there are optmizations
@@ -144,10 +143,10 @@ def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
         )
     else:
         sent_dict = {
-            'label' : 'None',
-            'sentence' : sentence,
-            'axis_offsets' : None,
-            'sig_offsets' : None,
+            'label': 'None',
+            'sentence': sentence,
+            'axis_offsets': None,
+            'sig_offsets': None,
         }
         ann_sents.append(sent_dict)
     return ann_sents
@@ -157,6 +156,11 @@ def _assemble(sentence, taggers_dict, axis_task, mode='inf'):
 # to 120 string format for easy
 # pattern matching
 def get_partitions(annotation):
+    tag_map = {'O': 0, 'B': 1, 'I': 2}
+
+    def tag2idx(tag):
+        return tag_map[tag[0]]
+    '''
     def tag2idx(tag):
         if tag != 'O':
             if tag[0] == 'B':
@@ -166,6 +170,7 @@ def get_partitions(annotation):
         # 2 identifies the second
         else:
             return '0'
+    '''
     return ''.join(map(tag2idx, annotation))
 
 
@@ -223,10 +228,10 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
                     ann_sent[s2] = ann_sent[s2] + ' </a2>'
                     
                     sent_dict = {
-                        'label' : None,
-                        'sentence' : ' '.join(ann_sent),
-                        'axis_offsets' : (a1, a2),
-                        'sig_offsets' : (s1, s2),
+                        'label': None,
+                        'sentence': ' '.join(ann_sent),
+                        'axis_offsets': (a1, a2),
+                        'sig_offsets': (s1, s2),
                     }
                     merged_annotations.append(sent_dict)
         else:
@@ -234,10 +239,10 @@ def merge_annotations(axis_ann, sig_ann_ls, sentence):
             ann_sent[a1] = '<a1> ' + ann_sent[a1]
             ann_sent[a2] = ann_sent[a2] + ' </a1>'
             sent_dict = {
-                'label' : "None",
-                'sentence' : ' '.join(ann_sent),
-                'axis_offsets' : (a1, a2),
-                'sig_offsets' : None,
+                'label': "None",
+                'sentence': ' '.join(ann_sent),
+                'axis_offsets': (a1, a2),
+                'sig_offsets': None,
             }
             merged_annotations.append(sent_dict)
     return merged_annotations
@@ -253,7 +258,9 @@ def get_intersect(ls1, ls2):
             ls = [*g][0]
             inf = max(i[0] for i in ls)
             sup = min(i[1] for i in ls)
+            out.append((inf, sup))
     return out
+
 
 def relex_label_to_matrix(relex_label, label_map, max_len):
     sent_labels = np.zeros((max_len, max_len))
@@ -266,6 +273,7 @@ def relex_label_to_matrix(relex_label, label_map, max_len):
             sent_labels[first_idx][second_idx] = label_idx
     return sent_labels
 
+
 # Get dictionary of final pipeline predictions
 # over annotated sentences, indexed by task name
 def get_eval_predictions(
@@ -274,7 +282,7 @@ def get_eval_predictions(
         taggers_dict,
         out_model_dict,
         axis_task,
-        max_len,
+        # max_len,
 ):
 
     ann_sent_groups = assemble(
@@ -320,7 +328,7 @@ def get_eval_predictions(
     for out_task, out_pipe in out_model_dict.items():
         out_pipe_predictions_matrices = []
         out_pipe_predictions_tuples = []
-       task_processor = cnlp_processors[classifier_to_relex[out_task]]() 
+        task_processor = cnlp_processors[classifier_to_relex[out_task]]()
         label_list = task_processor.get_labels()
         label_map = {label: i for i, label in enumerate(label_list)}
         
@@ -335,7 +343,6 @@ def get_eval_predictions(
                     # Get the output for each relation classifier models,
                     # tokenizer_kwargs are passed directly
                     # text classification pipelines during __call__
-                    # (Huggingface's idea not mine)
                     pipe_output = out_pipe(
                         ann_sent,
                         padding="max_length",
@@ -352,9 +359,9 @@ def get_eval_predictions(
                     if axis_offsets not in axis_mention_dict.keys():
                         axis_mention_dict[axis_offsets] = {}
                         axis_label_dict = {
-                            'sentence' : ann_sent,
-                            'score' : strongest_label['score'],
-                            'sig_offsets' : sig_offsets,
+                            'sentence': ann_sent,
+                            'score': strongest_label['score'],
+                            'sig_offsets': sig_offsets,
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
                     # Also need to update if there's either no label for this particular
@@ -362,15 +369,16 @@ def get_eval_predictions(
                     # has a stronger signal than the current label 
                     elif label_update(strongest_label, axis_mention_dict, axis_offsets):
                         axis_label_dict = {
-                            'sentence' : ann_sent,
-                            'score' : strongest_label['score'],
-                            'sig_offsets' : sig_offsets,
+                            'sentence': ann_sent,
+                            'score': strongest_label['score'],
+                            'sig_offsets': sig_offsets,
                         }
                         axis_mention_dict[axis_offsets][strongest_label['label']] = axis_label_dict
 
             # Turn the dict structure used for comparing label scores
             # into a set of axis token idx, sig token idx, label tuples
             sent_label_tuples = dict_to_label_list(axis_mention_dict)
+            '''
             out_pipe_predictions_matrices.append(
                 # turn the tuples into label matrix
                 relex_label_to_matrix(
@@ -379,22 +387,24 @@ def get_eval_predictions(
                     max_len,
                 )
             )
-
+            '''
             out_pipe_predictions_tuples.append(sent_label_tuples)
-        predictions_dict[out_task] = (
-            out_pipe_predictions_matrices,
-            out_pipe_predictions_tuples,
-        )
+        # predictions_dict[out_task] = (
+            # out_pipe_predictions_matrices,
+            # out_pipe_predictions_tuples,
+        # )
+
+        predictions_dict[out_task] = out_pipe_predictions_tuples
 
         # How to convert the sentence
         # ground truth labels into the
         # same matrix format as the predictions
         # outside the function for scoring
-        def local_relex_matrix(new_label_list):
+        def local_relex_matrix(new_label_list, local_max_len):
             return relex_label_to_matrix(
                 new_label_list,
                 label_map,
-                max_len,
+                local_max_len,
             )
         
     return predictions_dict, local_relex_matrix
@@ -408,7 +418,7 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
                        in task_names]
     idx_labels_dict, str_labels_dict = {}, {}
     if mode == "inf":
-        # 'test' let's us forget labels
+        # 'test' lets us forget labels
         # just use the first task processor since
         # _create_examples and _read_tsv are task/label agnostic
         examples = task_processors[0]._create_examples(
@@ -427,7 +437,8 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
         def example2label(example):
             # Just assumed relex
             if example.label:
-                return [ (int(start_token),int(end_token),label_map.get(category, 0)) for (start_token,end_token,category) in example.label]
+                return [(int(start_token), int(end_token), label_map.get(category, 0)) for
+                        (start_token, end_token, category) in example.label]
             else:
                 return 'None'
             
@@ -446,6 +457,7 @@ def get_sentences_and_labels(in_file: str, mode: str, task_names):
         ValueError("Mode must be either inference or eval")
 
     max_len = -1
+
     def get_sent_len(sent):
         return len(ctakes_tok(sent))
     
